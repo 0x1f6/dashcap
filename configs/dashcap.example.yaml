@@ -1,0 +1,31 @@
+# dashcap example configuration
+# Copy to /etc/dashcap/dashcap.yaml (Linux) or C:\ProgramData\dashcap\dashcap.yaml (Windows)
+# CLI flags override config file values.
+
+interface: eth0
+
+buffer:
+  size: 2GB            # Total ring buffer size
+  segment_size: 100MB  # Individual segment size (derived: segment_count = size / segment_size = 20)
+
+trigger:
+  default_duration: 5m # Default time window to save on trigger
+  debounce: 10s        # Min time between triggers (Phase 4)
+
+safety:
+  min_free_after_alloc: 1GB  # Min free disk space after preallocation
+  min_free_percent: 5        # Alternative: min % free after prealloc
+
+api:
+  tcp_port: 9800             # 0 = disabled; >0 = enable TCP REST API
+
+capture:
+  snaplen: 0           # 0 = full packets; >0 = truncate to N bytes
+  promiscuous: true
+
+storage:
+  data_dir: /var/lib/dashcap/eth0  # Base directory for this instance
+
+logging:
+  level: info          # debug | info | warn | error
+  format: json         # json | text

@@ -1,0 +1,63 @@
+// For format details, see https://aka.ms/devcontainer.json.
+{
+  "name": "Go",
+  // Official Microsoft Go devcontainer image
+  // Includes: Go, gopls, dlv, git, zsh, Oh My Zsh, nvm, non-root vscode user
+  // Tags: 1.25-trixie, 1.24-trixie, 1.25-bookworm, 1.24-bookworm
+   "build": {
+    "dockerfile": "Dockerfile",
+    "options": ["--network=host"]
+  },
+  "runArgs": ["--network=host"],
+  "features": {
+    // Node LTS (needed for openspec)
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts",
+      "nodeGypDependencies": false
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {
+      "version": "latest"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postAttachCommand": "echo '\n✨ Go DevContainer ready!\n💡 Quick commands: go test ./..., golangci-lint run, make help\n'",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "anthropic.claude-code",
+        "sst-dev.opencode",
+        "ms-vscode.makefile-tools",
+        "codezombiech.gitignore",
+        "usernamehw.errorlens",
+        "shardulm94.trailing-spaces",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "yzhang.markdown-all-in-one",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "go.toolsManagement.autoUpdate": true,
+        "go.lintTool": "golangci-lint",
+        "go.lintFlags": ["--fast"],
+        "go.testFlags": ["-v", "-count=1"],
+        "go.coverOnSave": false,
+        "go.coverOnSingleTest": true,
+        "editor.formatOnSave": true,
+        "[go]": {
+          "editor.defaultFormatter": "golang.go",
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        },
+        "[go.mod]": {
+          "editor.defaultFormatter": "golang.go"
+        }
+      }
+    }
+  },
+  "remoteEnv": {
+    "CGO_ENABLED": "1"
+  },
+  "remoteUser": "vscode"
+}
