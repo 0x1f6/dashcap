@@ -36,6 +36,9 @@ type Config struct {
 	// Disk safety
 	MinFreeAfterAlloc int64   // Minimum free bytes after preallocation
 	MinFreePercent    float64 // Minimum free percentage after preallocation
+
+	// Logging
+	Debug bool // Enable debug-level logging
 }
 
 // Defaults returns a Config populated with sensible Phase 1 defaults.

@@ -32,7 +32,7 @@ func newTriggerTestSetup(t *testing.T) (*config.Config, *buffer.RingManager) {
 		DataDir:           t.TempDir(),
 		SavedDir:          "saved",
 		MinFreeAfterAlloc: 0,
-		DefaultDuration:       5 * time.Minute,
+		DefaultDuration:   5 * time.Minute,
 	}
 	ring, err := buffer.NewRingManager(cfg, triggerTestDisk{}, layers.LinkTypeEthernet)
 	if err != nil {

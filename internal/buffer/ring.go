@@ -2,6 +2,7 @@ package buffer
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -126,7 +127,9 @@ func (rm *RingManager) Rotate() error {
 		return fmt.Errorf("ring rotate: close segment %d: %w", rm.current, err)
 	}
 
+	prev := rm.current
 	rm.current = (rm.current + 1) % rm.cfg.SegmentCount
+	slog.Debug("ring segment rotated", "from", prev, "to", rm.current, "total", rm.cfg.SegmentCount, "bytes_written", meta.Bytes, "packets", meta.Packets)
 	next := &rm.segments[rm.current]
 
 	w, err := NewSegmentWriter(next.Path, rm.linkType)

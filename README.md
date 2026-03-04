@@ -74,12 +74,12 @@ sudo bin/dashcap -i lo --buffer-size 10MB --segment-size 1MB --api-port 9800
 You should see:
 
 ```
-API token: <generated-token>
-dashcap vdev starting on interface lo
-ring buffer: 10 segments x 1MB = 10MB total
-ring pre-allocated at /var/lib/dashcap/lo
-WARNING: API auth enabled without TLS — tokens sent in cleartext
-REST API listening on :9800
+time=... level=INFO msg="API token generated" token=<generated-token>
+time=... level=INFO msg="dashcap starting" version=dev interface=lo
+time=... level=INFO msg="ring buffer configured" segments=10 segment_mb=1 total_mb=10
+time=... level=INFO msg="ring pre-allocated" path=/var/lib/dashcap/lo
+time=... level=WARN msg="API auth enabled without TLS — tokens sent in cleartext"
+time=... level=INFO msg="REST API listening" port=9800 proto=HTTP
 ```
 
 Copy the API token from the output — you'll need it for all API requests (except `/health`). To use a predictable token, pass `--api-token <value>` or set `DASHCAP_API_TOKEN=<value>`.
@@ -164,6 +164,7 @@ Press `Ctrl+C` or send `SIGTERM` — dashcap flushes the active segment and exit
 | `--default-duration` | `5m` | Default time window to save on trigger |
 | `--promiscuous` | `true` | Enable promiscuous mode on the interface |
 | `--snaplen` | `0` | Snapshot length (`0` = full packets) |
+| `--debug` | `false` | Enable debug-level logging (ring rotations, packet details) |
 
 Environment variables:
 

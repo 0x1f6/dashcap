@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -40,9 +41,9 @@ func New(cfg *config.Config, ring *buffer.RingManager, dispatcher *trigger.Dispa
 	mux.HandleFunc("GET /api/v1/triggers", s.handleTriggers)
 	mux.HandleFunc("GET /api/v1/ring", s.handleRing)
 
-	var handler http.Handler = mux
+	var handler = logMiddleware(mux)
 	if cfg.APIToken != "" {
-		handler = authMiddleware(cfg.APIToken, mux)
+		handler = authMiddleware(cfg.APIToken, handler)
 	}
 
 	s.srv = &http.Server{
@@ -170,6 +171,26 @@ func (s *Server) handleTriggers(w http.ResponseWriter, _ *http.Request) {
 // handleRing returns per-segment metadata for the ring buffer.
 func (s *Server) handleRing(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.ring.Segments())
+}
+
+// statusWriter wraps http.ResponseWriter to capture the status code.
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (sw *statusWriter) WriteHeader(code int) {
+	sw.code = code
+	sw.ResponseWriter.WriteHeader(code)
+}
+
+// logMiddleware logs each API request at info level.
+func logMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		slog.Info("api request", "method", r.Method, "path", r.URL.Path, "status", sw.code)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

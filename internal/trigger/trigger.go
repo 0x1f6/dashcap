@@ -3,6 +3,7 @@ package trigger
 
 import (
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -69,6 +70,7 @@ func (d *Dispatcher) Trigger(source string, opts TriggerOpts) (*TriggerRecord, e
 	cp := *rec
 	d.mu.Unlock()
 
+	slog.Info("trigger fired", "id", id, "source", source)
 	go d.save(rec, opts)
 	return &cp, nil
 }
@@ -104,6 +106,7 @@ func (d *Dispatcher) save(rec *TriggerRecord, opts TriggerOpts) {
 	}
 
 	segments := d.ring.SegmentsInWindow(from, now)
+	slog.Debug("trigger window selected", "id", rec.ID, "from", from, "to", now, "segments", len(segments))
 
 	// Best-effort: detect if data is incomplete.
 	var warning string
@@ -134,9 +137,11 @@ func (d *Dispatcher) save(rec *TriggerRecord, opts TriggerOpts) {
 	if err != nil {
 		rec.Status = StatusFailed
 		rec.Error = err.Error()
+		slog.Info("trigger failed", "id", rec.ID, "error", err)
 		return
 	}
 	rec.Status = StatusCompleted
 	rec.SavedPath = savedPath
 	rec.Warning = warning
+	slog.Info("trigger completed", "id", rec.ID, "path", savedPath, "segments", len(segments))
 }

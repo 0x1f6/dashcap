@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -78,6 +78,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&cfg.APINoAuth, "no-auth", false, "Disable API authentication")
 	cmd.Flags().StringVar(&cfg.TLSCert, "tls-cert", "", "Path to TLS certificate file")
 	cmd.Flags().StringVar(&cfg.TLSKey, "tls-key", "", "Path to TLS private key file")
+	cmd.Flags().BoolVar(&cfg.Debug, "debug", false, "Enable debug-level logging")
 
 	_ = cmd.MarkFlagRequired("interface")
 
@@ -96,6 +97,13 @@ func versionCmd() *cobra.Command {
 }
 
 func run(cfg *config.Config) error {
+	// Configure logger
+	logLevel := slog.LevelInfo
+	if cfg.Debug {
+		logLevel = slog.LevelDebug
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
+
 	// Apply DataDir default
 	if cfg.DataDir == "" {
 		cfg.DataDir = filepath.Join(storage.DefaultDataDir(), sanitize(cfg.Interface))
@@ -121,12 +129,11 @@ func run(cfg *config.Config) error {
 			}
 			cfg.APIToken = tok
 		}
-		log.Printf("API token: %s", cfg.APIToken)
+		slog.Info("API token generated", "token", cfg.APIToken)
 	}
 
-	log.Printf("dashcap %s starting on interface %s", version, cfg.Interface)
-	log.Printf("ring buffer: %d segments x %dMB = %dMB total",
-		cfg.SegmentCount, cfg.SegmentSize/1024/1024, int64(cfg.SegmentCount)*cfg.SegmentSize/1024/1024)
+	slog.Info("dashcap starting", "version", version, "interface", cfg.Interface)
+	slog.Info("ring buffer configured", "segments", cfg.SegmentCount, "segment_mb", cfg.SegmentSize/1024/1024, "total_mb", int64(cfg.SegmentCount)*cfg.SegmentSize/1024/1024)
 
 	// Acquire interface lock
 	disk := storage.New()
@@ -158,7 +165,7 @@ func run(cfg *config.Config) error {
 	}
 	defer func() { _ = ring.Close() }()
 
-	log.Printf("ring pre-allocated at %s", cfg.DataDir)
+	slog.Info("ring pre-allocated", "path", cfg.DataDir)
 
 	// Trigger dispatcher
 	dispatcher := trigger.NewDispatcher(cfg, ring)
@@ -167,17 +174,17 @@ func run(cfg *config.Config) error {
 	var apiServer *api.Server
 	if cfg.APIPort > 0 {
 		if !cfg.APINoAuth && cfg.TLSCert == "" {
-			log.Printf("WARNING: API auth enabled without TLS — tokens sent in cleartext")
+			slog.Warn("API auth enabled without TLS — tokens sent in cleartext")
 		}
 		apiServer = api.New(cfg, ring, dispatcher)
 		go func() {
+			proto := "HTTP"
 			if cfg.TLSCert != "" {
-				log.Printf("REST API listening on :%d (HTTPS)", cfg.APIPort)
-			} else {
-				log.Printf("REST API listening on :%d", cfg.APIPort)
+				proto = "HTTPS"
 			}
+			slog.Info("REST API listening", "port", cfg.APIPort, "proto", proto)
 			if err := apiServer.ListenAndServe(); err != nil {
-				log.Printf("API server stopped: %v", err)
+				slog.Info("API server stopped", "error", err)
 			}
 		}()
 	}
@@ -193,7 +200,7 @@ func run(cfg *config.Config) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-sigCh
-	log.Printf("received signal %s, shutting down", sig)
+	slog.Info("received signal, shutting down", "signal", sig)
 
 	// Graceful shutdown: stop capture source first so the loop exits,
 	// then wait for it to finish before closing the ring.
@@ -219,19 +226,19 @@ func captureLoop(src capture.Source, ring *buffer.RingManager, segmentSize int64
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			log.Printf("capture read error: %v", err)
+			slog.Debug("capture read error", "error", err)
 			continue
 		}
 
 		w := ring.CurrentWriter()
 		if err := w.WritePacket(ci, data); err != nil {
-			log.Printf("write packet: %v", err)
+			slog.Debug("write packet error", "error", err)
 			continue
 		}
 
 		if w.BytesWritten() >= segmentSize {
 			if err := ring.Rotate(); err != nil {
-				log.Printf("ring rotate: %v", err)
+				slog.Debug("ring rotate error", "error", err)
 			}
 		}
 	}

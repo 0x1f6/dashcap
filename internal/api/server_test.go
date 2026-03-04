@@ -42,7 +42,7 @@ func newTestServer(t *testing.T) string {
 		DataDir:           t.TempDir(),
 		SavedDir:          "saved",
 		MinFreeAfterAlloc: 0,
-		DefaultDuration:       5 * time.Minute,
+		DefaultDuration:   5 * time.Minute,
 		APIPort:           0,
 	}
 
