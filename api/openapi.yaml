@@ -1,0 +1,341 @@
+openapi: 3.1.0
+info:
+  title: dashcap API
+  version: 0.1.0
+  description: |
+    REST API for dashcap — a network packet dashcam with continuous full-packet
+    capture and on-demand persistence.
+
+    > **Unstable.** This API is under active development. Endpoints, request/response
+    > shapes, and authentication may change without notice.
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://localhost:9800
+    description: Default local instance
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      summary: Liveness check
+      description: Returns a simple status indicator. Does not require authentication.
+      security: []
+      tags: [health]
+      responses:
+        "200":
+          description: Instance is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/status:
+    get:
+      operationId: getStatus
+      summary: Instance status
+      description: |
+        Returns the current interface, uptime, and aggregate packet/byte counts
+        across all ring buffer segments.
+      tags: [status]
+      responses:
+        "200":
+          description: Current instance status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/trigger:
+    post:
+      operationId: createTrigger
+      summary: Trigger a capture save
+      description: |
+        Initiates a save of the capture window. The save runs asynchronously;
+        the response returns immediately with a pending trigger record.
+
+        You may optionally narrow the time window with either `duration` (relative)
+        or `since` (absolute). The two parameters are mutually exclusive. If neither
+        is provided, the configured default duration is used.
+      tags: [trigger]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TriggerRequest"
+      responses:
+        "202":
+          description: Trigger accepted and processing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerRecord"
+        "400":
+          description: Invalid request parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                mutuallyExclusive:
+                  summary: Both duration and since provided
+                  value:
+                    error: "duration and since are mutually exclusive"
+                invalidDuration:
+                  summary: Unparseable duration string
+                  value:
+                    error: "invalid duration: time: invalid duration \"xyz\""
+                negativeDuration:
+                  summary: Non-positive duration
+                  value:
+                    error: "duration must be positive"
+                invalidSince:
+                  summary: Unparseable since timestamp
+                  value:
+                    error: "invalid since timestamp (expected RFC 3339): parsing time \"bad\" as \"2006-01-02T15:04:05Z07:00\": cannot parse \"bad\" as \"2006\""
+                futureSince:
+                  summary: Since timestamp in the future
+                  value:
+                    error: "since must not be in the future"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: Internal error during save.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/triggers:
+    get:
+      operationId: listTriggers
+      summary: List trigger history
+      description: Returns all trigger records, newest first.
+      tags: [trigger]
+      responses:
+        "200":
+          description: Trigger history.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TriggerRecord"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/ring:
+    get:
+      operationId: getRing
+      summary: Ring buffer segment metadata
+      description: Returns per-segment metadata for the ring buffer.
+      tags: [ring]
+      responses:
+        "200":
+          description: Segment metadata list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SegmentMeta"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Bearer token printed to stderr at startup (auto-generated unless
+        set via `--api-token` flag or `DASHCAP_API_TOKEN` env var).
+        Disable with `--no-auth`.
+
+  responses:
+    TooManyRequests:
+      description: Rate limit exceeded. Not yet implemented — reserved for future use.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            default:
+              value:
+                error: "rate limit exceeded"
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+            examples: [5]
+
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            default:
+              value:
+                error: "unauthorized"
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          examples: [ok]
+
+    StatusResponse:
+      type: object
+      required: [interface, uptime, segment_count, total_packets, total_bytes]
+      properties:
+        interface:
+          type: string
+          description: Network interface being captured.
+          examples: [eth0]
+        uptime:
+          type: string
+          description: Time since instance start (Go duration string).
+          examples: [5m12s]
+        segment_count:
+          type: integer
+          description: Number of segments in the ring buffer.
+          examples: [20]
+        total_packets:
+          type: integer
+          format: int64
+          description: Total packets across all segments.
+          examples: [48230]
+        total_bytes:
+          type: integer
+          format: int64
+          description: Total bytes across all segments.
+          examples: [35217400]
+
+    TriggerRequest:
+      type: object
+      properties:
+        duration:
+          type: string
+          description: |
+            Relative time window to save (Go duration format, e.g. `5m`, `1h30m`).
+            Must be positive. Mutually exclusive with `since`.
+          examples: [10m]
+        since:
+          type: string
+          format: date-time
+          description: |
+            Absolute start of the time window (RFC 3339). Must not be in the
+            future. Mutually exclusive with `duration`.
+          examples: ["2026-03-02T22:25:00Z"]
+
+    TriggerRecord:
+      type: object
+      required: [id, timestamp, source, status]
+      properties:
+        id:
+          type: string
+          description: Unique trigger identifier (nanosecond timestamp + counter).
+          examples: ["1740960600000000000-1"]
+        timestamp:
+          type: string
+          format: date-time
+          description: Time the trigger was received.
+          examples: ["2026-03-02T22:30:00Z"]
+        source:
+          type: string
+          description: Origin of the trigger.
+          enum: [api, signal, cli]
+          examples: [api]
+        status:
+          type: string
+          description: Current processing state.
+          enum: [pending, completed, failed]
+          examples: [completed]
+        saved_path:
+          type: string
+          description: Filesystem path to the saved capture (present when completed).
+          examples: [/var/lib/dashcap/eth0/saved/2026-03-02T22-30-00_api]
+        error:
+          type: string
+          description: Error message (present when failed).
+        warning:
+          type: string
+          description: Warning about incomplete data coverage.
+
+    SegmentMeta:
+      type: object
+      description: |
+        Metadata for a single ring buffer segment. Note: field names are
+        upper-case (Go struct without json tags).
+      required: [Index, Path, StartTime, EndTime, Packets, Bytes]
+      properties:
+        Index:
+          type: integer
+          description: Segment index in the ring.
+          examples: [0]
+        Path:
+          type: string
+          description: Absolute path to the segment file.
+          examples: [/var/lib/dashcap/eth0/ring/segment_000.pcapng]
+        StartTime:
+          type: string
+          format: date-time
+          description: Timestamp of the first packet in this segment.
+          examples: ["2026-03-02T22:29:00Z"]
+        EndTime:
+          type: string
+          format: date-time
+          description: Timestamp of the last packet in this segment.
+          examples: ["2026-03-02T22:30:00Z"]
+        Packets:
+          type: integer
+          format: int64
+          description: Number of packets in this segment.
+          examples: [500]
+        Bytes:
+          type: integer
+          format: int64
+          description: Bytes written to this segment.
+          examples: [125000]
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+
+tags:
+  - name: health
+    description: Liveness and readiness checks.
+  - name: status
+    description: Instance status and metrics.
+  - name: trigger
+    description: Trigger capture saves and view history.
+  - name: ring
+    description: Ring buffer inspection.

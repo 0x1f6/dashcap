@@ -516,9 +516,11 @@ dashcap/
 *Goal: Production-ready configuration and traffic filtering.*
 
 - YAML configuration file support
-- BPF exclusion filters (compile and apply from config)
+- BPF exclusion filters (compile and apply from config, expose active filter in `/status`)
 - Pre/post trigger time windows
 - Trigger metadata and saved capture management
+- Capture metadata extracted from pcapng (protocols, packet counts, IP/MAC addresses)
+- CLI client subcommand (`dashcap trigger`, `dashcap status`, etc.) — same binary acts as API client
 - Configurable buffer limits (size, segment count, duration)
 - Hardlink-based saves where supported
 
@@ -540,7 +542,7 @@ dashcap/
 - AF_PACKET fast path for Linux (optional, configurable)
 - Hot-reload of BPF exclusion filters via API
 - Unix socket / Named Pipe API endpoints
-- Trigger debouncing and rate limiting
+- Trigger debouncing and API rate limiting (429 response, `Retry-After` header)
 - Saved capture retention policies (auto-cleanup by age/count)
 - Prometheus metrics endpoint
 - ~~Multi-segment merge for saved captures (single output file)~~ *(moved to Phase 1)*
@@ -552,7 +554,7 @@ dashcap/
 
 - Splunk/Elastic webhook trigger receivers
 - Automatic trigger via external anomaly detection
-- Export to remote storage (S3, SMB, SCP)
+- Pluggable persistence targets (local directory, S3, SMB, SCP)
 - macOS / launchd support
 - ARM64 builds for embedded/IoT use cases
 
