@@ -30,6 +30,7 @@ What's implemented:
 - REST API with `/trigger`, `/status`, `/health`, `/ring`, `/triggers` endpoints
 - Bearer-token API authentication (enabled by default, auto-generated token)
 - TLS support for the API server (`--tls-cert` / `--tls-key`)
+- Built-in CLI client (`dashcap client`) with human-readable and JSON output modes
 - Triggered saves merge segments into a single `capture.pcapng` file
 - Interface locking (one instance per interface)
 - Disk safety checks (absolute + percentage-based free space thresholds)
@@ -96,6 +97,14 @@ curl http://127.0.0.1:9800/api/v1/health
 
 ### 3. Check status
 
+Using the built-in client (recommended):
+
+```bash
+dashcap client status --token <token>
+```
+
+Or with curl:
+
 ```bash
 curl -s -H "Authorization: Bearer <token>" http://127.0.0.1:9800/api/v1/status | python3 -m json.tool
 ```
@@ -111,6 +120,12 @@ curl -s -H "Authorization: Bearer <token>" http://127.0.0.1:9800/api/v1/status |
 ```
 
 ### 4. Trigger a save
+
+```bash
+dashcap client trigger --token <token>
+```
+
+Or with curl:
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer <token>" http://127.0.0.1:9800/api/v1/trigger | python3 -m json.tool
@@ -141,6 +156,12 @@ wireshark /var/lib/dashcap/lo/saved/2026-03-02T22-30-00_api/capture.pcapng
 ### 6. View ring buffer state
 
 ```bash
+dashcap client ring --token <token>
+```
+
+Or with curl:
+
+```bash
 curl -s -H "Authorization: Bearer <token>" http://127.0.0.1:9800/api/v1/ring | python3 -m json.tool
 ```
 
@@ -149,6 +170,10 @@ curl -s -H "Authorization: Bearer <token>" http://127.0.0.1:9800/api/v1/ring | p
 Press `Ctrl+C` or send `SIGTERM` — dashcap flushes the active segment and exits cleanly.
 
 ## CLI Reference
+
+### Server Flags
+
+These flags configure the capture daemon (the root `dashcap` command):
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -166,16 +191,39 @@ Press `Ctrl+C` or send `SIGTERM` — dashcap flushes the active segment and exit
 | `--snaplen` | `0` | Snapshot length (`0` = full packets) |
 | `--debug` | `false` | Enable debug-level logging (ring rotations, packet details) |
 
-Environment variables:
+### Client Flags
+
+These flags configure the `dashcap client` subcommand group for interacting with a running dashcap instance:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host` | `localhost` | API server host |
+| `--port` | `9800` | API server port |
+| `--token` | | Bearer token (falls back to `$DASHCAP_API_TOKEN`) |
+| `--tls` | `false` | Use HTTPS |
+| `--tls-skip-verify` | `false` | Skip TLS certificate verification |
+| `--pretty` | *(auto)* | Force human-readable output |
+| `--json` | *(auto)* | Force JSON output |
+
+Output mode is auto-detected: pretty when stdout is a TTY, JSON when piped. Use `--pretty` or `--json` to override.
+
+### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `DASHCAP_API_TOKEN` | API token (overridden by `--api-token` flag) |
+| `DASHCAP_API_TOKEN` | API token — used by both server (overridden by `--api-token`) and client (overridden by `--token`) |
 
-Subcommands:
+### Subcommands
 
 ```bash
-dashcap version     # Print version, commit, and build time
+dashcap version                # Print version, commit, and build time
+dashcap client health          # Check server health
+dashcap client status          # Show capture status (interface, uptime, packets, bytes)
+dashcap client trigger         # Trigger a capture save
+dashcap client trigger --duration 30s   # Trigger with custom duration
+dashcap client trigger --since 2024-01-01T00:00:00Z  # Trigger from specific time
+dashcap client triggers        # List trigger history
+dashcap client ring            # Show ring buffer segment metadata
 ```
 
 ## REST API
@@ -209,6 +257,7 @@ dashcap/
 │   ├── api/               # REST API server (net/http)
 │   ├── buffer/            # Ring manager + pcapng segment writer
 │   ├── capture/           # Packet capture abstraction (gopacket/pcap)
+│   ├── client/            # HTTP client for the REST API (used by `dashcap client`)
 │   ├── config/            # Runtime configuration + validation
 │   ├── persist/           # Save triggered captures to disk
 │   ├── storage/           # Platform-specific disk ops (prealloc, flock, free space)

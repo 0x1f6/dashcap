@@ -347,13 +347,15 @@ C:\ProgramData\dashcap\            # Windows base
 
 ### 8.4 API Isolation
 
-Each instance exposes its own API endpoint. The default is a Unix socket / Named Pipe named after the interface (no port conflicts). An optional TCP port can be configured per instance for remote access.
+Each instance exposes its own API endpoint via TCP (configured with `--api-port`). The built-in client connects to a specific instance by host and port:
 
 ```bash
-dashcap trigger --interface eth0          # Talks to eth0's socket/pipe
-dashcap status  --interface eth1          # Talks to eth1's socket/pipe
-dashcap status  --api-url http://host:9800  # Direct TCP connection
+dashcap client status                                 # Default: localhost:9800
+dashcap client status --host 10.0.0.5 --port 8080     # Remote instance
+dashcap client trigger --host 10.0.0.5 --port 8080    # Trigger on remote
 ```
+
+Unix socket / Named Pipe support for local communication without port conflicts is planned for a future phase.
 
 ### 8.5 Service Integration
 
@@ -477,6 +479,8 @@ dashcap/
 │   │   └── filter.go
 │   ├── api/                    # REST API server
 │   │   └── server.go
+│   ├── client/                 # HTTP client for REST API (used by `dashcap client`)
+│   │   └── client.go
 │   └── config/                 # Configuration loading + validation
 │       └── config.go
 ├── configs/
@@ -520,7 +524,7 @@ dashcap/
 - Pre/post trigger time windows
 - Trigger metadata and saved capture management
 - Capture metadata extracted from pcapng (protocols, packet counts, IP/MAC addresses)
-- CLI client subcommand (`dashcap trigger`, `dashcap status`, etc.) — same binary acts as API client
+- ~~CLI client subcommand (`dashcap trigger`, `dashcap status`, etc.) — same binary acts as API client~~ *(done — implemented as `dashcap client <action>` with `--pretty`/`--json` output modes)*
 - Configurable buffer limits (size, segment count, duration)
 - Hardlink-based saves where supported
 

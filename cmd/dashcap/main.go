@@ -83,6 +83,7 @@ func rootCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("interface")
 
 	cmd.AddCommand(versionCmd())
+	cmd.AddCommand(clientCmd())
 	return cmd
 }
 
