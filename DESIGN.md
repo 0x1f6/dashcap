@@ -93,15 +93,15 @@ A dashcam solves an analogous problem for drivers: it records continuously but o
 ### 4.2 Control Plane
 
 ```
-  ┌──────────────────┐     ┌─────────────────┐
-  │   REST API        │     │  Signal Handler  │
-  │   (TCP / Socket)  │     │  (Unix/Pipe)     │
-  └────────┬──────────┘     └────────┬─────────┘
-           │                         │
-           ▼                         ▼
+  ┌──────────────────┐
+  │   REST API        │
+  │   (TCP)           │
+  └────────┬──────────┘
+           │
+           ▼
   ┌──────────────────────────────────────────┐
   │          Trigger Dispatcher               │
-  │   Receives signals, initiates persistence │
+  │   Receives requests, initiates persistence│
   └──────────────────────────────────────────┘
 ```
 

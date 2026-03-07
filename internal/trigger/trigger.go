@@ -53,7 +53,7 @@ func NewDispatcher(cfg *config.Config, ring *buffer.RingManager) *Dispatcher {
 }
 
 // Trigger initiates a save of the capture window. source identifies the
-// caller (e.g. "api", "signal", "cli"). opts may override the default duration.
+// caller (e.g. "api"). opts may override the default duration.
 // Returns a snapshot copy of the record at the moment of creation (Status = "pending").
 func (d *Dispatcher) Trigger(source string, opts TriggerOpts) (*TriggerRecord, error) {
 	d.mu.Lock()
