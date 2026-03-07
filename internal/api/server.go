@@ -102,6 +102,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"segment_count": len(segs),
 		"total_packets": totalPackets,
 		"total_bytes":   totalBytes,
+		"bpf_filter":    s.cfg.ActiveBPFFilter,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

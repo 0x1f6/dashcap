@@ -1,7 +1,16 @@
 // Package config defines dashcap runtime configuration.
 package config
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+// Exclusion defines a named BPF filter expression used to exclude traffic from capture.
+type Exclusion struct {
+	Name   string // Human-readable identifier (e.g. "backup_traffic")
+	Filter string // BPF expression in tcpdump syntax (e.g. "host 10.0.0.50 and port 443")
+}
 
 // Config holds all runtime configuration for a dashcap instance.
 type Config struct {
@@ -32,6 +41,10 @@ type Config struct {
 	// Capture settings
 	SnapLen     int // 0 = full packets
 	Promiscuous bool
+
+	// Exclusion filters
+	Exclusions      []Exclusion // BPF exclusion filter rules
+	ActiveBPFFilter string      // Combined BPF expression applied at startup (set by run())
 
 	// Disk safety
 	MinFreeAfterAlloc int64   // Minimum free bytes after preallocation
@@ -75,7 +88,33 @@ func (c *Config) Validate() error {
 	if (c.TLSCert == "") != (c.TLSKey == "") {
 		return errorf("--tls-cert and --tls-key must both be set")
 	}
+	for i, ex := range c.Exclusions {
+		if ex.Name == "" {
+			return errorf(fmt.Sprintf("exclusion #%d: name must not be empty", i+1))
+		}
+		if ex.Filter == "" {
+			return errorf(fmt.Sprintf("exclusion %q: filter must not be empty", ex.Name))
+		}
+	}
 	return nil
+}
+
+// BuildBPFFilter combines exclusions into a single BPF expression.
+// Returns empty string if there are no exclusions.
+// Each exclusion is negated and ANDed: "not (<expr1>) and not (<expr2>)".
+func BuildBPFFilter(exclusions []Exclusion) string {
+	if len(exclusions) == 0 {
+		return ""
+	}
+	parts := make([]string, len(exclusions))
+	for i, ex := range exclusions {
+		parts[i] = "not (" + ex.Filter + ")"
+	}
+	result := parts[0]
+	for _, p := range parts[1:] {
+		result += " and " + p
+	}
+	return result
 }
 
 // errorf is a simple error helper to avoid importing fmt in this package alone.

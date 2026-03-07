@@ -26,6 +26,15 @@ capture:
   snaplen: 0           # 0 = full packets; >0 = truncate to N bytes
   promiscuous: true
 
+# BPF exclusion filters — exclude known-benign high-volume traffic from capture.
+# Each entry has a name (for logging) and a BPF filter expression (tcpdump syntax).
+# Excluded traffic is filtered at the kernel level before reaching userspace.
+# exclusions:
+#   - name: backup_traffic
+#     filter: "host 10.0.0.50 and port 443"
+#   - name: dns_noise
+#     filter: "udp port 53 and host 10.0.0.1"
+
 storage:
   data_dir: /var/lib/dashcap/eth0  # Base directory for this instance
 

@@ -45,6 +45,7 @@ func rootCmd() *cobra.Command {
 		configFile     string
 		bufferSizeStr  string
 		segmentSizeStr string
+		excludeExpr    string
 	)
 
 	cmd := &cobra.Command{
@@ -85,6 +86,13 @@ func rootCmd() *cobra.Command {
 				}
 			}
 
+			if excludeExpr != "" {
+				cfg.Exclusions = append(cfg.Exclusions, config.Exclusion{
+					Name:   "cli",
+					Filter: excludeExpr,
+				})
+			}
+
 			if cfg.Interface == "" {
 				return fmt.Errorf("interface must be set (use -i flag or config file)")
 			}
@@ -107,6 +115,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.TLSCert, "tls-cert", "", "Path to TLS certificate file")
 	cmd.Flags().StringVar(&cfg.TLSKey, "tls-key", "", "Path to TLS private key file")
 	cmd.Flags().BoolVar(&cfg.Debug, "debug", false, "Enable debug-level logging")
+	cmd.Flags().StringVar(&excludeExpr, "exclude", "", "BPF exclusion filter expression (tcpdump syntax)")
 
 	cmd.AddCommand(versionCmd())
 	cmd.AddCommand(clientCmd())
@@ -221,6 +230,22 @@ func run(cfg *config.Config) error {
 	src, err := capture.OpenLive(cfg.Interface, cfg.SnapLen, cfg.Promiscuous)
 	if err != nil {
 		return fmt.Errorf("open capture on %s: %w", cfg.Interface, err)
+	}
+
+	// Apply BPF exclusion filters
+	if len(cfg.Exclusions) > 0 {
+		if err := capture.ValidateExclusions(cfg.Exclusions, src.LinkType(), cfg.SnapLen); err != nil {
+			return fmt.Errorf("bpf exclusion: %w", err)
+		}
+		bpf := config.BuildBPFFilter(cfg.Exclusions)
+		if err := src.SetBPFFilter(bpf); err != nil {
+			return fmt.Errorf("apply bpf filter: %w", err)
+		}
+		cfg.ActiveBPFFilter = bpf
+		for _, ex := range cfg.Exclusions {
+			slog.Info("exclusion filter configured", "name", ex.Name, "filter", ex.Filter)
+		}
+		slog.Info("BPF filter applied", "expression", bpf)
 	}
 
 	// Resolve hostname once for pcapng SHB metadata

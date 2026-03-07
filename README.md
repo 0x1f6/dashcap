@@ -190,6 +190,7 @@ These flags configure the capture daemon (the root `dashcap` command):
 | `--default-duration` | `5m` | Default time window to save on trigger |
 | `--promiscuous` | `true` | Enable promiscuous mode on the interface |
 | `--snaplen` | `0` | Snapshot length (`0` = full packets) |
+| `--exclude` | | BPF exclusion filter expression, tcpdump syntax (e.g. `"host 10.0.0.50"`) |
 | `--debug` | `false` | Enable debug-level logging (ring rotations, packet details) |
 
 ### Client Flags

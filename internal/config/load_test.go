@@ -222,6 +222,56 @@ func TestResolveConfigFileExplicitMissing(t *testing.T) {
 	}
 }
 
+func TestLoadFileExclusions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+interface: eth0
+exclusions:
+  - name: backup_traffic
+    filter: "host 10.0.0.50 and port 443"
+  - name: dns_noise
+    filter: "udp port 53 and host 10.0.0.1"
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if len(cfg.Exclusions) != 2 {
+		t.Fatalf("Exclusions: got %d, want 2", len(cfg.Exclusions))
+	}
+	if cfg.Exclusions[0].Name != "backup_traffic" {
+		t.Errorf("Exclusions[0].Name: got %q, want %q", cfg.Exclusions[0].Name, "backup_traffic")
+	}
+	if cfg.Exclusions[0].Filter != "host 10.0.0.50 and port 443" {
+		t.Errorf("Exclusions[0].Filter: got %q", cfg.Exclusions[0].Filter)
+	}
+	if cfg.Exclusions[1].Name != "dns_noise" {
+		t.Errorf("Exclusions[1].Name: got %q, want %q", cfg.Exclusions[1].Name, "dns_noise")
+	}
+}
+
+func TestLoadFileNoExclusions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `interface: lo`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if len(cfg.Exclusions) != 0 {
+		t.Errorf("Exclusions: got %d, want 0", len(cfg.Exclusions))
+	}
+}
+
 func TestResolveConfigFileNoDefault(t *testing.T) {
 	// With empty explicit and no default file, should return empty string
 	got, err := ResolveConfigFile("")

@@ -12,14 +12,15 @@ import (
 
 // fileConfig is the intermediate YAML structure matching configs/dashcap.example.yaml.
 type fileConfig struct {
-	Interface string      `yaml:"interface"`
-	Buffer    fileBuffer  `yaml:"buffer"`
-	Trigger   fileTrigger `yaml:"trigger"`
-	Safety    fileSafety  `yaml:"safety"`
-	API       fileAPI     `yaml:"api"`
-	Capture   fileCapture `yaml:"capture"`
-	Storage   fileStorage `yaml:"storage"`
-	Logging   fileLogging `yaml:"logging"`
+	Interface  string          `yaml:"interface"`
+	Buffer     fileBuffer      `yaml:"buffer"`
+	Trigger    fileTrigger     `yaml:"trigger"`
+	Safety     fileSafety      `yaml:"safety"`
+	API        fileAPI         `yaml:"api"`
+	Capture    fileCapture     `yaml:"capture"`
+	Exclusions []fileExclusion `yaml:"exclusions"`
+	Storage    fileStorage     `yaml:"storage"`
+	Logging    fileLogging     `yaml:"logging"`
 }
 
 type fileBuffer struct {
@@ -47,6 +48,11 @@ type fileAPI struct {
 type fileCapture struct {
 	SnapLen     int  `yaml:"snaplen"`
 	Promiscuous bool `yaml:"promiscuous"`
+}
+
+type fileExclusion struct {
+	Name   string `yaml:"name"`
+	Filter string `yaml:"filter"`
 }
 
 type fileStorage struct {
@@ -127,6 +133,9 @@ func LoadFile(path string) (*Config, error) {
 	// into a map and checking for the key.
 	if hasKey(data, "capture", "promiscuous") {
 		cfg.Promiscuous = fc.Capture.Promiscuous
+	}
+	for _, ex := range fc.Exclusions {
+		cfg.Exclusions = append(cfg.Exclusions, Exclusion(ex))
 	}
 	if fc.Storage.DataDir != "" {
 		cfg.DataDir = fc.Storage.DataDir

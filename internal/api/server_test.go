@@ -248,3 +248,85 @@ func TestTriggerEmptyObjectUsesDefault(t *testing.T) {
 		t.Errorf("status: got %d, want 202; body: %s", code, body)
 	}
 }
+
+func TestStatusIncludesBPFFilter(t *testing.T) {
+	base := newTestServerWithBPF(t, "not (udp port 53)")
+
+	code, body := getBody(t, base+"/api/v1/status")
+	if code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	bpf, ok := resp["bpf_filter"].(string)
+	if !ok {
+		t.Fatalf("bpf_filter field missing from response: %s", body)
+	}
+	if bpf != "not (udp port 53)" {
+		t.Errorf("bpf_filter: got %q, want %q", bpf, "not (udp port 53)")
+	}
+}
+
+func TestStatusBPFFilterEmpty(t *testing.T) {
+	base := newTestServer(t)
+
+	code, body := getBody(t, base+"/api/v1/status")
+	if code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	bpf, ok := resp["bpf_filter"].(string)
+	if !ok {
+		t.Fatalf("bpf_filter field missing from response: %s", body)
+	}
+	if bpf != "" {
+		t.Errorf("bpf_filter: got %q, want empty", bpf)
+	}
+}
+
+// newTestServerWithBPF creates a test server with an active BPF filter set.
+func newTestServerWithBPF(t *testing.T, bpfFilter string) string {
+	t.Helper()
+
+	cfg := &config.Config{
+		Interface:         "test0",
+		BufferSize:        3 * 1024,
+		SegmentSize:       1024,
+		SegmentCount:      3,
+		DataDir:           t.TempDir(),
+		SavedDir:          "saved",
+		MinFreeAfterAlloc: 0,
+		DefaultDuration:   5 * time.Minute,
+		APIPort:           0,
+		ActiveBPFFilter:   bpfFilter,
+	}
+
+	ring, err := buffer.NewRingManager(cfg, apiTestDisk{}, layers.LinkTypeEthernet, buffer.SHBInfo{})
+	if err != nil {
+		t.Fatalf("NewRingManager: %v", err)
+	}
+	t.Cleanup(func() { _ = ring.Close() })
+
+	disp := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+
+	srv := api.New(cfg, ring, disp)
+	go func() { _ = srv.Serve(l) }()
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	})
+
+	return fmt.Sprintf("http://%s", l.Addr().String())
+}

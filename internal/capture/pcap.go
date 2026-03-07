@@ -7,6 +7,8 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+
+	"dashcap/internal/config"
 )
 
 // PcapSource is a capture.Source backed by gopacket/pcap (libpcap / Npcap).
@@ -46,4 +48,19 @@ func (s *PcapSource) LinkType() layers.LinkType {
 // Close implements Source.
 func (s *PcapSource) Close() {
 	s.handle.Close()
+}
+
+// ValidateExclusions validates each exclusion's BPF syntax individually.
+// Returns an error identifying the invalid exclusion by name.
+func ValidateExclusions(exclusions []config.Exclusion, linkType layers.LinkType, snaplen int) error {
+	if snaplen <= 0 {
+		snaplen = 65535
+	}
+	for _, ex := range exclusions {
+		_, err := pcap.CompileBPFFilter(linkType, snaplen, ex.Filter)
+		if err != nil {
+			return fmt.Errorf("exclusion %q: invalid BPF filter: %w", ex.Name, err)
+		}
+	}
+	return nil
 }

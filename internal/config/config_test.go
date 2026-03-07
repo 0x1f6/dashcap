@@ -114,3 +114,72 @@ func TestValidateRejectsTooFewSegments(t *testing.T) {
 		t.Fatal("expected error when segment_count < 2")
 	}
 }
+
+func TestValidateRejectsExclusionEmptyName(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Interface = "eth0"
+	cfg.Exclusions = []config.Exclusion{{Name: "", Filter: "port 80"}}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for exclusion with empty name")
+	}
+	if !strings.Contains(err.Error(), "name must not be empty") {
+		t.Errorf("error should mention 'name must not be empty', got: %v", err)
+	}
+}
+
+func TestValidateRejectsExclusionEmptyFilter(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Interface = "eth0"
+	cfg.Exclusions = []config.Exclusion{{Name: "test", Filter: ""}}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for exclusion with empty filter")
+	}
+	if !strings.Contains(err.Error(), "filter must not be empty") {
+		t.Errorf("error should mention 'filter must not be empty', got: %v", err)
+	}
+}
+
+func TestValidateAcceptsValidExclusions(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Interface = "eth0"
+	cfg.Exclusions = []config.Exclusion{
+		{Name: "dns", Filter: "udp port 53"},
+		{Name: "backup", Filter: "host 10.0.0.50"},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildBPFFilterEmpty(t *testing.T) {
+	got := config.BuildBPFFilter(nil)
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestBuildBPFFilterSingle(t *testing.T) {
+	exclusions := []config.Exclusion{{Name: "dns", Filter: "udp port 53"}}
+	got := config.BuildBPFFilter(exclusions)
+	want := "not (udp port 53)"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildBPFFilterMultiple(t *testing.T) {
+	exclusions := []config.Exclusion{
+		{Name: "dns", Filter: "udp port 53"},
+		{Name: "backup", Filter: "host 10.0.0.50 and port 443"},
+	}
+	got := config.BuildBPFFilter(exclusions)
+	want := "not (udp port 53) and not (host 10.0.0.50 and port 443)"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
