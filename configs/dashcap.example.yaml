@@ -10,14 +10,17 @@ buffer:
 
 trigger:
   default_duration: 5m # Default time window to save on trigger
-  debounce: 10s        # Min time between triggers (Phase 4)
 
 safety:
-  min_free_after_alloc: 1GB  # Min free disk space after preallocation
-  min_free_percent: 5        # Alternative: min % free after prealloc
+  min_free_after_alloc: 5GB  # Min free disk space after preallocation
+  min_free_percent: 15       # Alternative: min % free after prealloc
 
 api:
   tcp_port: 9800             # 0 = disabled; >0 = enable TCP REST API
+  token: ""                  # Bearer token for API auth (empty = auto-generated)
+  no_auth: false             # Disable API authentication entirely
+  tls_cert: ""               # Path to TLS certificate file
+  tls_key: ""                # Path to TLS private key file
 
 capture:
   snaplen: 0           # 0 = full packets; >0 = truncate to N bytes
@@ -28,4 +31,3 @@ storage:
 
 logging:
   level: info          # debug | info | warn | error
-  format: json         # json | text

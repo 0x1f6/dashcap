@@ -177,6 +177,7 @@ These flags configure the capture daemon (the root `dashcap` command):
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--config` | *(see below)* | Path to YAML config file |
 | `-i`, `--interface` | *(required)* | Network interface to capture on |
 | `--buffer-size` | `2GB` | Total ring buffer size (e.g. `2GB`, `500MB`) |
 | `--segment-size` | `100MB` | Size of each ring segment (e.g. `100MB`, `1MB`) |
@@ -244,9 +245,16 @@ All endpoints return JSON. The API listens on the port specified by `--api-port`
 
 ## Configuration
 
-dashcap is configured via CLI flags. YAML configuration file support is planned for Phase 2.
+dashcap supports both CLI flags and a YAML configuration file. CLI flags always take precedence over config file values.
 
-An example configuration file is provided at [`configs/dashcap.example.yaml`](configs/dashcap.example.yaml) for reference.
+**Config file discovery:**
+- `--config <path>` — use the specified file (error if not found)
+- No `--config` — automatically loads from the platform default path if the file exists:
+  - Linux/macOS: `/etc/dashcap/dashcap.yaml`
+  - Windows: `C:\ProgramData\dashcap\dashcap.yaml`
+- If no config file is found, dashcap runs with CLI flags and built-in defaults only
+
+An example configuration file is provided at [`configs/dashcap.example.yaml`](configs/dashcap.example.yaml).
 
 ## Project Structure
 

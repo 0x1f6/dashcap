@@ -42,6 +42,7 @@ func rootCmd() *cobra.Command {
 	cfg := config.Defaults()
 
 	var (
+		configFile     string
 		bufferSizeStr  string
 		segmentSizeStr string
 	)
@@ -55,18 +56,45 @@ func rootCmd() *cobra.Command {
 		),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Parse human-readable size strings
-			if err := parseSize(bufferSizeStr, &cfg.BufferSize); err != nil {
-				return fmt.Errorf("--buffer-size: %w", err)
+			// Load config file (if any)
+			cfgPath, err := config.ResolveConfigFile(configFile)
+			if err != nil {
+				return err
 			}
-			if err := parseSize(segmentSizeStr, &cfg.SegmentSize); err != nil {
-				return fmt.Errorf("--segment-size: %w", err)
+			if cfgPath != "" {
+				fileCfg, err := config.LoadFile(cfgPath)
+				if err != nil {
+					return err
+				}
+				*cfg = *fileCfg
+				slog.Info("config loaded", "path", cfgPath)
 			}
+
+			// Apply CLI flags that were explicitly set (override config file)
+			applyFlags(cmd, cfg)
+
+			// Parse size strings for flags that were set via CLI
+			if cmd.Flags().Changed("buffer-size") {
+				if err := config.ParseSize(bufferSizeStr, &cfg.BufferSize); err != nil {
+					return fmt.Errorf("--buffer-size: %w", err)
+				}
+			}
+			if cmd.Flags().Changed("segment-size") {
+				if err := config.ParseSize(segmentSizeStr, &cfg.SegmentSize); err != nil {
+					return fmt.Errorf("--segment-size: %w", err)
+				}
+			}
+
+			if cfg.Interface == "" {
+				return fmt.Errorf("interface must be set (use -i flag or config file)")
+			}
+
 			return run(cfg)
 		},
 	}
 
-	cmd.Flags().StringVarP(&cfg.Interface, "interface", "i", cfg.Interface, "Network interface to capture on")
+	cmd.Flags().StringVar(&configFile, "config", "", "Path to YAML config file (default: "+config.DefaultConfigPath()+")")
+	cmd.Flags().StringVarP(&cfg.Interface, "interface", "i", "", "Network interface to capture on")
 	cmd.Flags().StringVar(&bufferSizeStr, "buffer-size", "2GB", "Total ring buffer size (e.g. 2GB, 500MB)")
 	cmd.Flags().StringVar(&segmentSizeStr, "segment-size", "100MB", "Size of each ring segment (e.g. 100MB)")
 	cmd.Flags().StringVar(&cfg.DataDir, "data-dir", "", "Data directory (default: "+storage.DefaultDataDir()+"/<interface>)")
@@ -80,11 +108,47 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.TLSKey, "tls-key", "", "Path to TLS private key file")
 	cmd.Flags().BoolVar(&cfg.Debug, "debug", false, "Enable debug-level logging")
 
-	_ = cmd.MarkFlagRequired("interface")
-
 	cmd.AddCommand(versionCmd())
 	cmd.AddCommand(clientCmd())
 	return cmd
+}
+
+// applyFlags overrides cfg with CLI flag values that the user explicitly set.
+func applyFlags(cmd *cobra.Command, cfg *config.Config) {
+	f := cmd.Flags()
+	if f.Changed("interface") {
+		cfg.Interface, _ = f.GetString("interface")
+	}
+	if f.Changed("data-dir") {
+		cfg.DataDir, _ = f.GetString("data-dir")
+	}
+	if f.Changed("api-port") {
+		cfg.APIPort, _ = f.GetInt("api-port")
+	}
+	if f.Changed("default-duration") {
+		cfg.DefaultDuration, _ = f.GetDuration("default-duration")
+	}
+	if f.Changed("promiscuous") {
+		cfg.Promiscuous, _ = f.GetBool("promiscuous")
+	}
+	if f.Changed("snaplen") {
+		cfg.SnapLen, _ = f.GetInt("snaplen")
+	}
+	if f.Changed("api-token") {
+		cfg.APIToken, _ = f.GetString("api-token")
+	}
+	if f.Changed("no-auth") {
+		cfg.APINoAuth, _ = f.GetBool("no-auth")
+	}
+	if f.Changed("tls-cert") {
+		cfg.TLSCert, _ = f.GetString("tls-cert")
+	}
+	if f.Changed("tls-key") {
+		cfg.TLSKey, _ = f.GetString("tls-key")
+	}
+	if f.Changed("debug") {
+		cfg.Debug, _ = f.GetBool("debug")
+	}
 }
 
 func versionCmd() *cobra.Command {
@@ -277,34 +341,4 @@ func generateToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
-}
-
-// parseSize parses strings like "2GB", "500MB", "100KB" into bytes.
-func parseSize(s string, dest *int64) error {
-	if s == "" {
-		return nil
-	}
-	suffixes := map[string]int64{
-		"KB": 1024,
-		"MB": 1024 * 1024,
-		"GB": 1024 * 1024 * 1024,
-		"TB": 1024 * 1024 * 1024 * 1024,
-	}
-	for suffix, mult := range suffixes {
-		if len(s) > len(suffix) && s[len(s)-len(suffix):] == suffix {
-			var n int64
-			if _, err := fmt.Sscan(s[:len(s)-len(suffix)], &n); err != nil {
-				return fmt.Errorf("invalid size %q: %w", s, err)
-			}
-			*dest = n * mult
-			return nil
-		}
-	}
-	// Plain number in bytes
-	var n int64
-	if _, err := fmt.Sscan(s, &n); err != nil {
-		return fmt.Errorf("invalid size %q: %w", s, err)
-	}
-	*dest = n
-	return nil
 }
