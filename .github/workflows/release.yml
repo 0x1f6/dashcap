@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install libpcap-dev
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build Linux amd64
+        run: |
+          TAG="$(git describe --tags --exact-match 2>/dev/null || git describe --tags --always)"
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          LDFLAGS="-s -w -X main.version=${TAG} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}"
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o dist/dashcap-linux-amd64 ./cmd/dashcap
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashcap-linux-amd64
+          path: dist/dashcap-linux-amd64
+
+  build-windows:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install cross-compilation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 wget unzip
+
+      - name: Download WinPcap Developer Pack
+        run: |
+          wget -q https://www.winpcap.org/install/bin/WpdPack_4_1_2.zip -O /tmp/WpdPack.zip
+          unzip -q /tmp/WpdPack.zip -d /tmp
+          sudo mkdir -p /usr/x86_64-w64-mingw32/include /usr/x86_64-w64-mingw32/lib
+          sudo cp -r /tmp/WpdPack/Include/* /usr/x86_64-w64-mingw32/include/
+          sudo cp /tmp/WpdPack/Lib/x64/* /usr/x86_64-w64-mingw32/lib/
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build Windows amd64
+        env:
+          CC: x86_64-w64-mingw32-gcc
+          CGO_ENABLED: "1"
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          TAG="$(git describe --tags --exact-match 2>/dev/null || git describe --tags --always)"
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          LDFLAGS="-s -w -X main.version=${TAG} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}"
+          go build -ldflags "${LDFLAGS}" -o dist/dashcap-windows-amd64.exe ./cmd/dashcap
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashcap-windows-amd64
+          path: dist/dashcap-windows-amd64.exe
+
+  release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: cd dist && sha256sum * > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
