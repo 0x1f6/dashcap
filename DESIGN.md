@@ -493,6 +493,8 @@ dashcap/
 - Platform-aware paths (Linux, macOS, Windows)
 - Graceful shutdown with capture flush on SIGTERM/SIGINT
 - Builds for Linux (amd64) and Windows (amd64)
+- GitHub Actions CI (lint, test, build) and release workflows (cross-compile + GitHub Releases)
+- Dependabot for Go module and Actions version updates
 
 ### Phase 2 — Configuration & Filters
 

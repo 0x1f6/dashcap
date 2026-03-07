@@ -268,6 +268,14 @@ dashcap/
 └── go.mod
 ```
 
+## CI/CD
+
+GitHub Actions runs on every push and PR to `main`:
+
+- **CI** (`.github/workflows/ci.yml`): lint (`golangci-lint`), test (race detector + coverage), build verification
+- **Release** (`.github/workflows/release.yml`): triggered on `v*` tags or manually. Builds Linux amd64 and Windows amd64 binaries, creates a GitHub Release with SHA256 checksums.
+- **Dependabot** (`.github/dependabot.yml`): weekly updates for Go modules and GitHub Actions versions.
+
 ## Development
 
 ```bash
