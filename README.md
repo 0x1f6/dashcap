@@ -4,7 +4,7 @@ A network packet dashcam — continuous full-packet capture with on-demand persi
 
 > **Work in progress.** dashcap is under active development and not yet stable or suitable for production use. APIs, CLI flags, and on-disk formats may change without notice.
 
-dashcap continuously captures all network traffic into a pre-allocated ring buffer of pcapng segments. When triggered (via REST API or CLI), it saves the relevant capture window — including traffic from *before* the trigger — for later analysis. Think of it as a dashcam for your network: always recording, only saving when something happens.
+dashcap continuously captures all network traffic into a pre-allocated ring buffer of pcapng segments. When triggered (via the REST API), it saves the relevant capture window — including traffic from *before* the trigger — for later analysis. Think of it as a dashcam for your network: always recording, only saving when something happens.
 
 ## How It Works
 

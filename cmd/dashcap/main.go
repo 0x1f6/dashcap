@@ -50,7 +50,7 @@ func rootCmd() *cobra.Command {
 		Use:   "dashcap",
 		Short: "Network packet dashcam — continuous capture with on-demand persistence",
 		Long: fmt.Sprintf(
-			"dashcap v%s (%s built %s)\n\nContinuously captures packets into a pre-allocated ring buffer.\nTrigger a save via REST API or CLI to preserve a capture window.",
+			"dashcap v%s (%s built %s)\n\nContinuously captures packets into a pre-allocated ring buffer.\nTrigger a save via the REST API to preserve a capture window.",
 			version, commit, buildTime,
 		),
 		SilenceUsage: true,
