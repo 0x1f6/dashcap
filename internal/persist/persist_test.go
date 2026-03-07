@@ -105,7 +105,7 @@ func TestSaveCaptureCreatesDirectory(t *testing.T) {
 	})
 
 	segs := []buffer.SegmentMeta{{Index: 0, Path: segPath, StartTime: t0}}
-	gotPath, err := persist.SaveCapture(savedDir, "tid1", "api", "eth0", defaultSaveOpts(), segs)
+	gotPath, err := persist.SaveCapture(savedDir, "tid1", "api", "eth0", defaultSaveOpts(), segs, buffer.SHBInfo{})
 	if err != nil {
 		t.Fatalf("SaveCapture: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestSaveCaptureProducesSingleFile(t *testing.T) {
 	})
 
 	segs := []buffer.SegmentMeta{{Index: 0, Path: segPath, StartTime: t0}}
-	gotPath, err := persist.SaveCapture(savedDir, "tid2", "api", "eth0", defaultSaveOpts(), segs)
+	gotPath, err := persist.SaveCapture(savedDir, "tid2", "api", "eth0", defaultSaveOpts(), segs, buffer.SHBInfo{})
 	if err != nil {
 		t.Fatalf("SaveCapture: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestSaveCaptureMultipleSegmentsMerged(t *testing.T) {
 		{Index: 1, Path: seg1, StartTime: t1},
 		{Index: 2, Path: seg2, StartTime: t2},
 	}
-	gotPath, err := persist.SaveCapture(savedDir, "tid3", "api", "eth0", defaultSaveOpts(), segs)
+	gotPath, err := persist.SaveCapture(savedDir, "tid3", "api", "eth0", defaultSaveOpts(), segs, buffer.SHBInfo{})
 	if err != nil {
 		t.Fatalf("SaveCapture: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestSaveCaptureChronologicalOrderWraparound(t *testing.T) {
 		{Index: 1, Path: seg1, StartTime: tLate},
 		{Index: 2, Path: seg2, StartTime: tEarly},
 	}
-	gotPath, err := persist.SaveCapture(savedDir, "tid4", "api", "eth0", defaultSaveOpts(), segs)
+	gotPath, err := persist.SaveCapture(savedDir, "tid4", "api", "eth0", defaultSaveOpts(), segs, buffer.SHBInfo{})
 	if err != nil {
 		t.Fatalf("SaveCapture: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestSaveCaptureChronologicalOrderWraparound(t *testing.T) {
 func TestSaveCaptureEmptySegmentsError(t *testing.T) {
 	savedDir := filepath.Join(t.TempDir(), "saved")
 
-	_, err := persist.SaveCapture(savedDir, "tid5", "api", "eth0", defaultSaveOpts(), nil)
+	_, err := persist.SaveCapture(savedDir, "tid5", "api", "eth0", defaultSaveOpts(), nil, buffer.SHBInfo{})
 	if err == nil {
 		t.Fatal("expected error for empty segments, got nil")
 	}
@@ -260,7 +260,7 @@ func TestSaveCaptureMergedOutputReadable(t *testing.T) {
 		{Index: 0, Path: seg0, StartTime: t0},
 		{Index: 1, Path: seg1, StartTime: t1},
 	}
-	gotPath, err := persist.SaveCapture(savedDir, "tid6", "api", "eth0", defaultSaveOpts(), segs)
+	gotPath, err := persist.SaveCapture(savedDir, "tid6", "api", "eth0", defaultSaveOpts(), segs, buffer.SHBInfo{})
 	if err != nil {
 		t.Fatalf("SaveCapture: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestSaveCaptureMetadataHasCapturePath(t *testing.T) {
 	})
 
 	segs := []buffer.SegmentMeta{{Index: 0, Path: segPath, StartTime: t0}}
-	gotPath, err := persist.SaveCapture(savedDir, "my-trigger-id", "signal", "eth1", defaultSaveOpts(), segs)
+	gotPath, err := persist.SaveCapture(savedDir, "my-trigger-id", "signal", "eth1", defaultSaveOpts(), segs, buffer.SHBInfo{})
 	if err != nil {
 		t.Fatalf("SaveCapture: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestSaveCaptureReturnsPathUnderSavedDir(t *testing.T) {
 	})
 
 	segs := []buffer.SegmentMeta{{Index: 0, Path: segPath, StartTime: t0}}
-	gotPath, err := persist.SaveCapture(savedDir, "tid7", "api", "eth0", defaultSaveOpts(), segs)
+	gotPath, err := persist.SaveCapture(savedDir, "tid7", "api", "eth0", defaultSaveOpts(), segs, buffer.SHBInfo{})
 	if err != nil {
 		t.Fatalf("SaveCapture: %v", err)
 	}

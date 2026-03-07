@@ -159,8 +159,19 @@ func run(cfg *config.Config) error {
 		return fmt.Errorf("open capture on %s: %w", cfg.Interface, err)
 	}
 
+	// Resolve hostname once for pcapng SHB metadata
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+	shb := buffer.SHBInfo{
+		Version:   version,
+		Hostname:  hostname,
+		Interface: cfg.Interface,
+	}
+
 	// Initialise ring manager (disk safety check + prealloc)
-	ring, err := buffer.NewRingManager(cfg, disk, src.LinkType())
+	ring, err := buffer.NewRingManager(cfg, disk, src.LinkType(), shb)
 	if err != nil {
 		return fmt.Errorf("ring manager: %w", err)
 	}
@@ -169,7 +180,7 @@ func run(cfg *config.Config) error {
 	slog.Info("ring pre-allocated", "path", cfg.DataDir)
 
 	// Trigger dispatcher
-	dispatcher := trigger.NewDispatcher(cfg, ring)
+	dispatcher := trigger.NewDispatcher(cfg, ring, shb)
 
 	// REST API server
 	var apiServer *api.Server

@@ -43,13 +43,14 @@ type Dispatcher struct {
 	mu      sync.Mutex
 	cfg     *config.Config
 	ring    *buffer.RingManager
+	shb     buffer.SHBInfo
 	history []*TriggerRecord
 	counter int64
 }
 
 // NewDispatcher creates a Dispatcher backed by the given ring buffer.
-func NewDispatcher(cfg *config.Config, ring *buffer.RingManager) *Dispatcher {
-	return &Dispatcher{cfg: cfg, ring: ring}
+func NewDispatcher(cfg *config.Config, ring *buffer.RingManager, shb buffer.SHBInfo) *Dispatcher {
+	return &Dispatcher{cfg: cfg, ring: ring, shb: shb}
 }
 
 // Trigger initiates a save of the capture window. source identifies the
@@ -130,7 +131,7 @@ func (d *Dispatcher) save(rec *TriggerRecord, opts TriggerOpts) {
 		ActualTo:          now,
 		Warning:           warning,
 	}
-	savedPath, err := persist.SaveCapture(savedDir, rec.ID, rec.Source, d.cfg.Interface, saveOpts, segments)
+	savedPath, err := persist.SaveCapture(savedDir, rec.ID, rec.Source, d.cfg.Interface, saveOpts, segments, d.shb)
 
 	d.mu.Lock()
 	defer d.mu.Unlock()

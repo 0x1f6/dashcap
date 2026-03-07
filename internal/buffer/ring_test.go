@@ -42,7 +42,7 @@ func TestNewRingManagerInsufficientSpace(t *testing.T) {
 	cfg := newRingTestConfig(t)
 	disk := &fakeDisk{freeBytes: 0, totalBytes: 100 << 30}
 
-	_, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet)
+	_, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet, SHBInfo{})
 	if err == nil {
 		t.Fatal("expected error for insufficient disk space, got nil")
 	}
@@ -60,7 +60,7 @@ func TestNewRingManagerPercentRejectsAllocation(t *testing.T) {
 	cfg.MinFreeAfterAlloc = 0
 	disk := &fakeDisk{freeBytes: 4 << 30, totalBytes: 100 << 30}
 
-	_, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet)
+	_, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet, SHBInfo{})
 	if err == nil {
 		t.Fatal("expected error for percentage-based rejection, got nil")
 	}
@@ -73,7 +73,7 @@ func TestNewRingManagerCreatesSegmentFiles(t *testing.T) {
 	cfg := newRingTestConfig(t)
 	disk := &fakeDisk{freeBytes: 1 << 30, totalBytes: 100 << 30}
 
-	rm, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet)
+	rm, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet, SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewRingManager: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestRotateAdvancesSegment(t *testing.T) {
 	cfg := newRingTestConfig(t)
 	disk := &fakeDisk{freeBytes: 1 << 30, totalBytes: 100 << 30}
 
-	rm, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet)
+	rm, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet, SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewRingManager: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestRotateWrapsAround(t *testing.T) {
 	cfg := newRingTestConfig(t) // 3 segments
 	disk := &fakeDisk{freeBytes: 1 << 30, totalBytes: 100 << 30}
 
-	rm, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet)
+	rm, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet, SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewRingManager: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestSegmentsInWindow(t *testing.T) {
 	cfg := newRingTestConfig(t)
 	disk := &fakeDisk{freeBytes: 1 << 30, totalBytes: 100 << 30}
 
-	rm, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet)
+	rm, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet, SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewRingManager: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestRingManagerClose(t *testing.T) {
 	cfg := newRingTestConfig(t)
 	disk := &fakeDisk{freeBytes: 1 << 30, totalBytes: 100 << 30}
 
-	rm, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet)
+	rm, err := NewRingManager(cfg, disk, layers.LinkTypeEthernet, SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewRingManager: %v", err)
 	}

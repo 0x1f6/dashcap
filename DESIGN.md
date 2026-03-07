@@ -505,7 +505,6 @@ dashcap/
 - `GET /api/v1/triggers/{id}` endpoint to retrieve trigger metadata and capture statistics
 - Capture metadata extracted from pcapng and included in metadata (IP addresses, protocols, packet counts per protocol) — enables quick triage without opening Wireshark
 - Embedding dashcap metadata in pcapng Section Header Block options (`shb_userappl`, `shb_comment`)
-- Configurable buffer limits (size, segment count, duration)
 
 ### Phase 3 — Production Hardening
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"time"
 
@@ -41,7 +42,7 @@ type TriggerMeta struct {
 
 // SaveCapture merges the given segments into a single capture.pcapng in a
 // timestamped subdirectory of savedDir and writes a metadata.json file.
-func SaveCapture(savedDir, triggerID, source, iface string, opts SaveOpts, segments []buffer.SegmentMeta) (string, error) {
+func SaveCapture(savedDir, triggerID, source, iface string, opts SaveOpts, segments []buffer.SegmentMeta, shb buffer.SHBInfo) (string, error) {
 	if len(segments) == 0 {
 		return "", fmt.Errorf("persist: no segments to save")
 	}
@@ -53,7 +54,7 @@ func SaveCapture(savedDir, triggerID, source, iface string, opts SaveOpts, segme
 	}
 
 	capturePath := filepath.Join(destDir, "capture.pcapng")
-	if err := concatSegments(capturePath, segments); err != nil {
+	if err := concatSegments(capturePath, segments, shb); err != nil {
 		_ = os.Remove(capturePath)
 		return "", fmt.Errorf("persist: concat segments: %w", err)
 	}
@@ -80,7 +81,7 @@ func SaveCapture(savedDir, triggerID, source, iface string, opts SaveOpts, segme
 
 // concatSegments reads packets from all source segments (sorted by StartTime)
 // and writes them into a single pcapng file at dst.
-func concatSegments(dst string, segments []buffer.SegmentMeta) error {
+func concatSegments(dst string, segments []buffer.SegmentMeta, shb buffer.SHBInfo) error {
 	sort.Slice(segments, func(i, j int) bool {
 		return segments[i].StartTime.Before(segments[j].StartTime)
 	})
@@ -111,7 +112,17 @@ func concatSegments(dst string, segments []buffer.SegmentMeta) error {
 		}
 
 		if ngw == nil {
-			ngw, err = pcapgo.NewNgWriter(out, ngr.LinkType())
+			intf := pcapgo.DefaultNgInterface
+			intf.LinkType = ngr.LinkType()
+			opts := pcapgo.NgWriterOptions{
+				SectionInfo: pcapgo.NgSectionInfo{
+					Hardware:    runtime.GOARCH,
+					OS:          runtime.GOOS,
+					Application: "dashcap " + shb.Version,
+					Comment:     fmt.Sprintf("host=%s interface=%s", shb.Hostname, shb.Interface),
+				},
+			}
+			ngw, err = pcapgo.NewNgWriterInterface(out, intf, opts)
 			if err != nil {
 				_ = f.Close()
 				return fmt.Errorf("create pcapng writer: %w", err)

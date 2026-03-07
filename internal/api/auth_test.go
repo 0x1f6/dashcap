@@ -38,13 +38,13 @@ func newAuthTestServer(t *testing.T) string {
 		APIToken:          testToken,
 	}
 
-	ring, err := buffer.NewRingManager(cfg, apiTestDisk{}, layers.LinkTypeEthernet)
+	ring, err := buffer.NewRingManager(cfg, apiTestDisk{}, layers.LinkTypeEthernet, buffer.SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewRingManager: %v", err)
 	}
 	t.Cleanup(func() { _ = ring.Close() })
 
-	disp := trigger.NewDispatcher(cfg, ring)
+	disp := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

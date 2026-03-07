@@ -30,6 +30,7 @@ type RingManager struct {
 	cfg      *config.Config
 	disk     storage.DiskOps
 	linkType layers.LinkType
+	shb      SHBInfo
 	segments []SegmentMeta
 	current  int // index of the active segment
 	writer   *SegmentWriter
@@ -37,7 +38,7 @@ type RingManager struct {
 
 // NewRingManager performs the disk safety check, pre-allocates all segment
 // files, and returns a ready-to-use RingManager.
-func NewRingManager(cfg *config.Config, disk storage.DiskOps, linkType layers.LinkType) (*RingManager, error) {
+func NewRingManager(cfg *config.Config, disk storage.DiskOps, linkType layers.LinkType, shb SHBInfo) (*RingManager, error) {
 	ringDir := filepath.Join(cfg.DataDir, "ring")
 	if err := os.MkdirAll(ringDir, 0o750); err != nil {
 		return nil, fmt.Errorf("ring manager: create ring dir: %w", err)
@@ -67,6 +68,7 @@ func NewRingManager(cfg *config.Config, disk storage.DiskOps, linkType layers.Li
 		cfg:      cfg,
 		disk:     disk,
 		linkType: linkType,
+		shb:      shb,
 		segments: make([]SegmentMeta, cfg.SegmentCount),
 	}
 
@@ -80,7 +82,7 @@ func NewRingManager(cfg *config.Config, disk storage.DiskOps, linkType layers.Li
 	}
 
 	// Open the first segment for writing
-	w, err := NewSegmentWriter(rm.segments[0].Path, linkType)
+	w, err := NewSegmentWriter(rm.segments[0].Path, linkType, shb)
 	if err != nil {
 		return nil, fmt.Errorf("ring manager: open initial segment: %w", err)
 	}
@@ -132,7 +134,7 @@ func (rm *RingManager) Rotate() error {
 	slog.Debug("ring segment rotated", "from", prev, "to", rm.current, "total", rm.cfg.SegmentCount, "bytes_written", meta.Bytes, "packets", meta.Packets)
 	next := &rm.segments[rm.current]
 
-	w, err := NewSegmentWriter(next.Path, rm.linkType)
+	w, err := NewSegmentWriter(next.Path, rm.linkType, rm.shb)
 	if err != nil {
 		return fmt.Errorf("ring rotate: open segment %d: %w", rm.current, err)
 	}

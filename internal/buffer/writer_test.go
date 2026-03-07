@@ -17,7 +17,7 @@ func TestNewSegmentWriterStartTime(t *testing.T) {
 	before := time.Now()
 	path := filepath.Join(t.TempDir(), "test.pcapng")
 
-	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet)
+	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet, SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewSegmentWriter: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestNewSegmentWriterStartTime(t *testing.T) {
 func TestWritePacketCounters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.pcapng")
 
-	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet)
+	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet, SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewSegmentWriter: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestWritePacketCounters(t *testing.T) {
 func TestCloseProducesReadablePcapng(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.pcapng")
 
-	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet)
+	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet, SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewSegmentWriter: %v", err)
 	}
@@ -122,6 +122,55 @@ func TestCloseProducesReadablePcapng(t *testing.T) {
 	}
 }
 
+func TestSHBMetadataWritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.pcapng")
+
+	shb := SHBInfo{
+		Version:   "v1.2.3",
+		Hostname:  "testhost",
+		Interface: "eth0",
+	}
+	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet, shb)
+	if err != nil {
+		t.Fatalf("NewSegmentWriter: %v", err)
+	}
+
+	pkt := make([]byte, 64)
+	ci := gopacket.CaptureInfo{
+		Timestamp:     time.Now(),
+		CaptureLength: 64,
+		Length:        64,
+	}
+	if err := w.WritePacket(ci, pkt); err != nil {
+		t.Fatalf("WritePacket: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Read back and verify SHB options
+	rf, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rf.Close() }()
+
+	r, err := pcapgo.NewNgReader(rf, pcapgo.NgReaderOptions{})
+	if err != nil {
+		t.Fatalf("NewNgReader: %v", err)
+	}
+
+	info := r.SectionInfo()
+	wantApp := "dashcap v1.2.3"
+	if info.Application != wantApp {
+		t.Errorf("SHB Application: got %q, want %q", info.Application, wantApp)
+	}
+	wantComment := "host=testhost interface=eth0"
+	if info.Comment != wantComment {
+		t.Errorf("SHB Comment: got %q, want %q", info.Comment, wantComment)
+	}
+}
+
 func TestNewSegmentWriterPreservesPrealloc(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prealloc.pcapng")
 
@@ -138,7 +187,7 @@ func TestNewSegmentWriterPreservesPrealloc(t *testing.T) {
 	_ = f.Close()
 
 	// Open with NewSegmentWriter — must NOT truncate the file.
-	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet)
+	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet, SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewSegmentWriter: %v", err)
 	}
@@ -171,7 +220,7 @@ func TestCloseOnPreallocatedFile(t *testing.T) {
 	_ = f.Close()
 
 	// Open, write packets, close.
-	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet)
+	w, err := NewSegmentWriter(path, layers.LinkTypeEthernet, SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewSegmentWriter: %v", err)
 	}

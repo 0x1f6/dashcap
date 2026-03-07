@@ -34,7 +34,7 @@ func newTriggerTestSetup(t *testing.T) (*config.Config, *buffer.RingManager) {
 		MinFreeAfterAlloc: 0,
 		DefaultDuration:   5 * time.Minute,
 	}
-	ring, err := buffer.NewRingManager(cfg, triggerTestDisk{}, layers.LinkTypeEthernet)
+	ring, err := buffer.NewRingManager(cfg, triggerTestDisk{}, layers.LinkTypeEthernet, buffer.SHBInfo{})
 	if err != nil {
 		t.Fatalf("NewRingManager: %v", err)
 	}
@@ -67,7 +67,7 @@ func waitForAllComplete(t *testing.T, d *trigger.Dispatcher, n int) {
 
 func TestTriggerReturnsNonEmptyID(t *testing.T) {
 	cfg, ring := newTriggerTestSetup(t)
-	d := trigger.NewDispatcher(cfg, ring)
+	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
 
 	rec, err := d.Trigger("api", trigger.TriggerOpts{})
 	if err != nil {
@@ -85,7 +85,7 @@ func TestTriggerReturnsNonEmptyID(t *testing.T) {
 
 func TestHistoryNewestFirst(t *testing.T) {
 	cfg, ring := newTriggerTestSetup(t)
-	d := trigger.NewDispatcher(cfg, ring)
+	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
 
 	for i := 0; i < 3; i++ {
 		if _, err := d.Trigger("test", trigger.TriggerOpts{}); err != nil {
@@ -110,7 +110,7 @@ func TestHistoryNewestFirst(t *testing.T) {
 
 func TestConcurrentTriggersSafe(t *testing.T) {
 	cfg, ring := newTriggerTestSetup(t)
-	d := trigger.NewDispatcher(cfg, ring)
+	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
 
 	const n = 10
 	var wg sync.WaitGroup

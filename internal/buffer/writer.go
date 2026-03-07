@@ -5,12 +5,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 )
+
+// SHBInfo holds metadata embedded in the pcapng Section Header Block.
+type SHBInfo struct {
+	Version   string // e.g. "v1.2.0"
+	Hostname  string // OS hostname
+	Interface string // capture interface name
+}
 
 // countingWriter wraps an io.Writer and counts every byte passing through.
 type countingWriter struct {
@@ -38,7 +46,8 @@ type SegmentWriter struct {
 // NewSegmentWriter opens (or creates) the file at path and initialises a
 // pcapng NgWriter with the supplied link-layer type. Pre-allocated files are
 // not truncated on open; writing starts from offset 0.
-func NewSegmentWriter(path string, linkType layers.LinkType) (*SegmentWriter, error) {
+// The SHBInfo metadata is embedded in the pcapng Section Header Block.
+func NewSegmentWriter(path string, linkType layers.LinkType, shb SHBInfo) (*SegmentWriter, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("segment writer open %q: %w", path, err)
@@ -48,7 +57,20 @@ func NewSegmentWriter(path string, linkType layers.LinkType) (*SegmentWriter, er
 		return nil, fmt.Errorf("segment writer seek %q: %w", path, err)
 	}
 	cw := &countingWriter{w: f}
-	ng, err := pcapgo.NewNgWriter(cw, linkType)
+
+	intf := pcapgo.DefaultNgInterface
+	intf.LinkType = linkType
+
+	opts := pcapgo.NgWriterOptions{
+		SectionInfo: pcapgo.NgSectionInfo{
+			Hardware:    runtime.GOARCH,
+			OS:          runtime.GOOS,
+			Application: "dashcap " + shb.Version,
+			Comment:     fmt.Sprintf("host=%s interface=%s", shb.Hostname, shb.Interface),
+		},
+	}
+
+	ng, err := pcapgo.NewNgWriterInterface(cw, intf, opts)
 	if err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("segment writer ng init %q: %w", path, err)
