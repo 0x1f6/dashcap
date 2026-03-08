@@ -9,10 +9,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"dashcap/internal/buffer"
 	"dashcap/internal/config"
+	"dashcap/internal/persist"
 	"dashcap/internal/trigger"
 )
 
@@ -38,6 +40,7 @@ func New(cfg *config.Config, ring *buffer.RingManager, dispatcher *trigger.Dispa
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/status", s.handleStatus)
 	mux.HandleFunc("POST /api/v1/trigger", s.handleTrigger)
+	mux.HandleFunc("GET /api/v1/trigger/{id}", s.handleTriggerStatus)
 	mux.HandleFunc("GET /api/v1/triggers", s.handleTriggers)
 	mux.HandleFunc("GET /api/v1/ring", s.handleRing)
 
@@ -158,10 +161,54 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 	rec, err := s.dispatcher.Trigger("api", opts)
 	if err != nil {
+		if de, ok := trigger.IsDebounceError(err); ok {
+			secs := int((de.RetryAfter + time.Second - 1) / time.Second)
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": de.Error()})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, rec)
+}
+
+// handleTriggerStatus returns the status and metadata of a single trigger.
+func (s *Server) handleTriggerStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rec := s.dispatcher.Get(id)
+	if rec == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "trigger not found"})
+		return
+	}
+
+	resp := map[string]any{
+		"id":        rec.ID,
+		"timestamp": rec.Timestamp,
+		"source":    rec.Source,
+		"status":    rec.Status,
+	}
+	if rec.Warning != "" {
+		resp["warning"] = rec.Warning
+	}
+
+	switch rec.Status {
+	case trigger.StatusPending:
+		resp["retry_after"] = 2
+		writeJSON(w, http.StatusAccepted, resp)
+	case trigger.StatusFailed:
+		resp["error"] = rec.Error
+		writeJSON(w, http.StatusOK, resp)
+	default: // completed
+		if rec.SavedPath != "" {
+			resp["saved_path"] = rec.SavedPath
+			meta, err := persist.ReadMeta(rec.SavedPath)
+			if err == nil {
+				resp["metadata"] = meta
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
 }
 
 // handleTriggers lists recent trigger records.

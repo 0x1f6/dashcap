@@ -186,6 +186,21 @@ func concatSegments(w io.Writer, segments []buffer.SegmentMeta, shb buffer.SHBIn
 	return &stats, nil
 }
 
+// ReadMeta reads and parses the metadata.json file from the given capture directory.
+func ReadMeta(dir string) (*TriggerMeta, error) {
+	path := filepath.Join(dir, "metadata.json")
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	var meta TriggerMeta
+	if err := json.NewDecoder(f).Decode(&meta); err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
 func writeJSON(path string, v any) error {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {

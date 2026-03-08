@@ -2,6 +2,7 @@
 package trigger
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -13,6 +14,28 @@ import (
 	"dashcap/internal/config"
 	"dashcap/internal/persist"
 )
+
+// DefaultDebounceInterval is the minimum time between accepted triggers.
+const DefaultDebounceInterval = 5 * time.Second
+
+// DebounceError is returned when a trigger is rejected due to debouncing.
+type DebounceError struct {
+	RetryAfter time.Duration
+}
+
+func (e *DebounceError) Error() string {
+	secs := int((e.RetryAfter + time.Second - 1) / time.Second)
+	return fmt.Sprintf("trigger debounced, retry after %d seconds", secs)
+}
+
+// IsDebounceError reports whether err is a DebounceError.
+func IsDebounceError(err error) (*DebounceError, bool) {
+	var de *DebounceError
+	if errors.As(err, &de) {
+		return de, true
+	}
+	return nil, false
+}
 
 // Status values for TriggerRecord.
 const (
@@ -40,17 +63,19 @@ type TriggerRecord struct {
 
 // Dispatcher multiplexes trigger signals from all input channels.
 type Dispatcher struct {
-	mu      sync.Mutex
-	cfg     *config.Config
-	ring    *buffer.RingManager
-	shb     buffer.SHBInfo
-	history []*TriggerRecord
-	counter int64
+	mu               sync.Mutex
+	cfg              *config.Config
+	ring             *buffer.RingManager
+	shb              buffer.SHBInfo
+	history          []*TriggerRecord
+	counter          int64
+	lastTriggerTime  time.Time
+	DebounceInterval time.Duration
 }
 
 // NewDispatcher creates a Dispatcher backed by the given ring buffer.
 func NewDispatcher(cfg *config.Config, ring *buffer.RingManager, shb buffer.SHBInfo) *Dispatcher {
-	return &Dispatcher{cfg: cfg, ring: ring, shb: shb}
+	return &Dispatcher{cfg: cfg, ring: ring, shb: shb, DebounceInterval: DefaultDebounceInterval}
 }
 
 // Trigger initiates a save of the capture window. source identifies the
@@ -58,6 +83,18 @@ func NewDispatcher(cfg *config.Config, ring *buffer.RingManager, shb buffer.SHBI
 // Returns a snapshot copy of the record at the moment of creation (Status = "pending").
 func (d *Dispatcher) Trigger(source string, opts TriggerOpts) (*TriggerRecord, error) {
 	d.mu.Lock()
+
+	// Debounce check.
+	if d.DebounceInterval > 0 && !d.lastTriggerTime.IsZero() {
+		elapsed := time.Since(d.lastTriggerTime)
+		if elapsed < d.DebounceInterval {
+			remaining := d.DebounceInterval - elapsed
+			d.mu.Unlock()
+			return nil, &DebounceError{RetryAfter: remaining}
+		}
+	}
+	d.lastTriggerTime = time.Now()
+
 	d.counter++
 	id := fmt.Sprintf("%d-%d", time.Now().UnixNano(), d.counter)
 	rec := &TriggerRecord{
@@ -86,6 +123,20 @@ func (d *Dispatcher) History() []*TriggerRecord {
 		out[len(d.history)-1-i] = &cp
 	}
 	return out
+}
+
+// Get returns a snapshot copy of the TriggerRecord with the given ID,
+// or nil if no such record exists.
+func (d *Dispatcher) Get(id string) *TriggerRecord {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, r := range d.history {
+		if r.ID == id {
+			cp := *r
+			return &cp
+		}
+	}
+	return nil
 }
 
 func (d *Dispatcher) save(rec *TriggerRecord, opts TriggerOpts) {

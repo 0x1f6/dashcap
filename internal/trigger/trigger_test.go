@@ -86,6 +86,7 @@ func TestTriggerReturnsNonEmptyID(t *testing.T) {
 func TestHistoryNewestFirst(t *testing.T) {
 	cfg, ring := newTriggerTestSetup(t)
 	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
+	d.DebounceInterval = 0
 
 	for i := 0; i < 3; i++ {
 		if _, err := d.Trigger("test", trigger.TriggerOpts{}); err != nil {
@@ -108,9 +109,95 @@ func TestHistoryNewestFirst(t *testing.T) {
 	}
 }
 
+func TestDebounceFirstTriggerAccepted(t *testing.T) {
+	cfg, ring := newTriggerTestSetup(t)
+	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
+	d.DebounceInterval = time.Second
+
+	rec, err := d.Trigger("api", trigger.TriggerOpts{})
+	if err != nil {
+		t.Fatalf("first trigger should succeed: %v", err)
+	}
+	if rec.ID == "" {
+		t.Error("trigger ID should be non-empty")
+	}
+	waitForAllComplete(t, d, 1)
+}
+
+func TestDebounceRejectsWithinWindow(t *testing.T) {
+	cfg, ring := newTriggerTestSetup(t)
+	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
+	d.DebounceInterval = 5 * time.Second
+
+	_, err := d.Trigger("api", trigger.TriggerOpts{})
+	if err != nil {
+		t.Fatalf("first trigger should succeed: %v", err)
+	}
+
+	// Second trigger immediately should be rejected.
+	_, err = d.Trigger("api", trigger.TriggerOpts{})
+	de, ok := trigger.IsDebounceError(err)
+	if !ok {
+		t.Fatalf("expected DebounceError, got: %v", err)
+	}
+	if de.RetryAfter <= 0 {
+		t.Errorf("RetryAfter should be positive, got: %v", de.RetryAfter)
+	}
+	waitForAllComplete(t, d, 1)
+}
+
+func TestDebounceAcceptsAfterWindow(t *testing.T) {
+	cfg, ring := newTriggerTestSetup(t)
+	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
+	d.DebounceInterval = 10 * time.Millisecond
+
+	_, err := d.Trigger("api", trigger.TriggerOpts{})
+	if err != nil {
+		t.Fatalf("first trigger should succeed: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	_, err = d.Trigger("api", trigger.TriggerOpts{})
+	if err != nil {
+		t.Fatalf("trigger after debounce window should succeed: %v", err)
+	}
+	waitForAllComplete(t, d, 2)
+}
+
+func TestGetExistingTrigger(t *testing.T) {
+	cfg, ring := newTriggerTestSetup(t)
+	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
+
+	rec, err := d.Trigger("api", trigger.TriggerOpts{})
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	waitForAllComplete(t, d, 1)
+
+	got := d.Get(rec.ID)
+	if got == nil {
+		t.Fatal("Get returned nil for existing trigger")
+	}
+	if got.ID != rec.ID {
+		t.Errorf("Get ID: got %q, want %q", got.ID, rec.ID)
+	}
+}
+
+func TestGetNonExistentTrigger(t *testing.T) {
+	cfg, ring := newTriggerTestSetup(t)
+	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
+
+	got := d.Get("nonexistent-id")
+	if got != nil {
+		t.Errorf("Get should return nil for nonexistent ID, got: %+v", got)
+	}
+}
+
 func TestConcurrentTriggersSafe(t *testing.T) {
 	cfg, ring := newTriggerTestSetup(t)
 	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
+	d.DebounceInterval = 0
 
 	const n = 10
 	var wg sync.WaitGroup

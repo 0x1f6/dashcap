@@ -130,6 +130,63 @@ func TestRing(t *testing.T) {
 	}
 }
 
+func TestTriggerStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if !strings.HasPrefix(r.URL.Path, "/api/v1/trigger/") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":         "test-1",
+			"status":     "completed",
+			"source":     "api",
+			"saved_path": "/data/saved/test",
+			"metadata":   map[string]any{"trigger_id": "test-1", "interface": "eth0"},
+		})
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv, "")
+	resp, err := c.TriggerStatus("test-1")
+	if err != nil {
+		t.Fatalf("TriggerStatus() error: %v", err)
+	}
+	if resp.ID != "test-1" {
+		t.Errorf("ID = %q, want %q", resp.ID, "test-1")
+	}
+	if resp.Status != "completed" {
+		t.Errorf("Status = %q, want %q", resp.Status, "completed")
+	}
+	if resp.Metadata == nil {
+		t.Error("Metadata should not be nil for completed trigger")
+	}
+}
+
+func TestTriggerStatusNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "trigger not found"})
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv, "")
+	_, err := c.TriggerStatus("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError, got %T", err)
+	}
+	if apiErr.StatusCode != 404 {
+		t.Errorf("StatusCode = %d, want 404", apiErr.StatusCode)
+	}
+}
+
 func TestAuthHeader(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

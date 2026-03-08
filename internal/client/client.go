@@ -92,6 +92,19 @@ type TriggerRequest struct {
 	Since    string `json:"since,omitempty"`
 }
 
+// TriggerStatusResponse is the response from GET /api/v1/trigger/{id}.
+type TriggerStatusResponse struct {
+	ID         string          `json:"id"`
+	Timestamp  string          `json:"timestamp"`
+	Source     string          `json:"source"`
+	Status     string          `json:"status"`
+	SavedPath  string          `json:"saved_path,omitempty"`
+	Error      string          `json:"error,omitempty"`
+	Warning    string          `json:"warning,omitempty"`
+	RetryAfter int             `json:"retry_after,omitempty"`
+	Metadata   json.RawMessage `json:"metadata,omitempty"`
+}
+
 // SegmentInfo is a single ring buffer segment from GET /api/v1/ring.
 type SegmentInfo struct {
 	Index     int    `json:"Index"`
@@ -124,6 +137,15 @@ func (c *Client) Status() (*StatusResponse, error) {
 func (c *Client) Trigger(req TriggerRequest) (*TriggerResponse, error) {
 	var resp TriggerResponse
 	if err := c.post("/api/v1/trigger", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// TriggerStatus calls GET /api/v1/trigger/{id}.
+func (c *Client) TriggerStatus(id string) (*TriggerStatusResponse, error) {
+	var resp TriggerStatusResponse
+	if err := c.get("/api/v1/trigger/"+id, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

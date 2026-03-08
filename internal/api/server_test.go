@@ -249,6 +249,151 @@ func TestTriggerEmptyObjectUsesDefault(t *testing.T) {
 	}
 }
 
+func TestTriggerStatusNotFound(t *testing.T) {
+	base := newTestServer(t)
+	code, body := getBody(t, base+"/api/v1/trigger/nonexistent")
+	if code != http.StatusNotFound {
+		t.Errorf("status: got %d, want 404; body: %s", code, body)
+	}
+	if !strings.Contains(body, "not found") {
+		t.Errorf("body should mention 'not found', got: %s", body)
+	}
+}
+
+func TestTriggerStatusPending(t *testing.T) {
+	base, disp := newTestServerEx(t)
+
+	// Trigger and immediately check status (should still be pending or already failed
+	// since test ring has no data — but the async goroutine may complete instantly).
+	rec, err := disp.Trigger("api", trigger.TriggerOpts{})
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+
+	// The save goroutine runs async, so the status may already be "failed"
+	// (no segments). We test the endpoint returns a valid response in either case.
+	code, body := getBody(t, base+"/api/v1/trigger/"+rec.ID)
+	if code != http.StatusOK && code != http.StatusAccepted {
+		t.Errorf("status: got %d, want 200 or 202; body: %s", code, body)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["id"] != rec.ID {
+		t.Errorf("id: got %v, want %s", resp["id"], rec.ID)
+	}
+}
+
+func TestTriggerStatusFailed(t *testing.T) {
+	base, disp := newTestServerEx(t)
+
+	rec, err := disp.Trigger("api", trigger.TriggerOpts{})
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	// Wait for save to fail (no segments in test ring).
+	waitForTriggerDone(t, disp, rec.ID)
+
+	code, body := getBody(t, base+"/api/v1/trigger/"+rec.ID)
+	if code != http.StatusOK {
+		t.Errorf("status: got %d, want 200; body: %s", code, body)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["status"] != "failed" {
+		t.Errorf("status field: got %v, want 'failed'", resp["status"])
+	}
+	if _, ok := resp["error"]; !ok {
+		t.Error("response should contain 'error' field for failed trigger")
+	}
+}
+
+func TestTriggerDebounce429(t *testing.T) {
+	base, disp := newTestServerEx(t)
+	disp.DebounceInterval = 5 * time.Second
+
+	// First trigger should succeed.
+	code1, _ := postTrigger(t, base, "")
+	if code1 != http.StatusAccepted {
+		t.Fatalf("first trigger: got %d, want 202", code1)
+	}
+
+	// Second trigger immediately should be debounced.
+	resp, err := http.Post(base+"/api/v1/trigger", "application/json", nil) //nolint:noctx
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("second trigger: got %d, want 429; body: %s", resp.StatusCode, b)
+	}
+	ra := resp.Header.Get("Retry-After")
+	if ra == "" {
+		t.Error("missing Retry-After header")
+	}
+}
+
+// waitForTriggerDone polls until the given trigger is no longer pending.
+func waitForTriggerDone(t *testing.T, d *trigger.Dispatcher, id string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		rec := d.Get(id)
+		if rec != nil && rec.Status != trigger.StatusPending {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Log("timeout waiting for trigger to complete")
+}
+
+// newTestServerEx creates a test server and returns both the base URL and dispatcher.
+func newTestServerEx(t *testing.T) (string, *trigger.Dispatcher) {
+	t.Helper()
+
+	cfg := &config.Config{
+		Interface:         "test0",
+		BufferSize:        3 * 1024,
+		SegmentSize:       1024,
+		SegmentCount:      3,
+		DataDir:           t.TempDir(),
+		SavedDir:          "saved",
+		MinFreeAfterAlloc: 0,
+		DefaultDuration:   5 * time.Minute,
+		APIPort:           0,
+	}
+
+	ring, err := buffer.NewRingManager(cfg, apiTestDisk{}, layers.LinkTypeEthernet, buffer.SHBInfo{})
+	if err != nil {
+		t.Fatalf("NewRingManager: %v", err)
+	}
+	t.Cleanup(func() { _ = ring.Close() })
+
+	disp := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
+	disp.DebounceInterval = 0 // disable by default for tests
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen: %v", err)
+	}
+
+	srv := api.New(cfg, ring, disp)
+	go func() { _ = srv.Serve(l) }()
+
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	})
+
+	return fmt.Sprintf("http://%s", l.Addr().String()), disp
+}
+
 func TestStatusIncludesBPFFilter(t *testing.T) {
 	base := newTestServerWithBPF(t, "not (udp port 53)")
 
