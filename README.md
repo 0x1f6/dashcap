@@ -21,13 +21,13 @@ Network Interface → Capture Engine → Segment Writer → Ring Buffer (fixed s
 
 ## Status
 
-**Phase 1 (MVP) is complete.** The core capture-to-disk pipeline with REST API triggers works on Linux. See [DESIGN.md](DESIGN.md) for the full roadmap.
+**Phase 1 (MVP) and Phase 2 (Configuration & Filters) are complete.** The core capture-to-disk pipeline with REST API triggers, YAML configuration, BPF exclusion filters, and per-trigger status tracking works on Linux. See [DESIGN.md](DESIGN.md) for the full roadmap.
 
 What's implemented:
 - `gopacket/pcap` capture backend (cross-platform)
 - pcapng segment writer with accurate byte tracking
 - Ring buffer with pre-allocated segments and rotation
-- REST API with `/trigger`, `/status`, `/health`, `/ring`, `/triggers` endpoints
+- REST API with `/trigger`, `/trigger/{id}`, `/status`, `/health`, `/ring`, `/triggers` endpoints
 - Bearer-token API authentication (enabled by default, auto-generated token)
 - TLS support for the API server (`--tls-cert` / `--tls-key`)
 - Built-in CLI client (`dashcap client`) with human-readable and JSON output modes
@@ -36,6 +36,12 @@ What's implemented:
 - Interface locking (one instance per interface)
 - Disk safety checks (absolute + percentage-based free space thresholds)
 - Platform-aware paths (Linux, macOS, Windows)
+- YAML configuration file support (with CLI flag precedence)
+- BPF exclusion filters (`--exclude`, standard tcpdump/BPF syntax)
+- Per-trigger status endpoint (`GET /trigger/{id}`) with capture statistics
+- Trigger debouncing (5s cooldown, 429 response)
+- pcapng Section Header Block metadata (dashcap version, hostname, interface)
+- Structured logging (`log/slog`) with `--debug` flag for verbose output
 
 ## Prerequisites
 
@@ -116,7 +122,8 @@ curl -s -H "Authorization: Bearer <token>" http://127.0.0.1:9800/api/v1/status |
     "uptime": "42s",
     "segment_count": 10,
     "total_packets": 200,
-    "total_bytes": 19600
+    "total_bytes": 19600,
+    "bpf_filter": ""
 }
 ```
 
@@ -245,6 +252,7 @@ All endpoints return JSON. The API listens on the port specified by `--api-port`
 | `GET` | `/api/v1/health` | No | Liveness check — returns `{"status": "ok"}` |
 | `GET` | `/api/v1/status` | Yes | Instance status: interface, uptime, packet/byte counts |
 | `POST` | `/api/v1/trigger` | Yes | Trigger a save of the pre-trigger window |
+| `GET` | `/api/v1/trigger/{id}` | Yes | Trigger status, metadata, and capture statistics |
 | `GET` | `/api/v1/triggers` | Yes | List all trigger records (newest first) |
 | `GET` | `/api/v1/ring` | Yes | Per-segment metadata: index, path, timestamps, packet/byte counts |
 

@@ -39,4 +39,4 @@ storage:
   data_dir: /var/lib/dashcap/eth0  # Base directory for this instance
 
 logging:
-  level: info          # debug | info | warn | error
+  level: info          # debug | info (debug enables verbose output)

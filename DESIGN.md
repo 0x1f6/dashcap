@@ -2,7 +2,7 @@
 
 > Full-Packet Capture with Ring Buffer and On-Demand Persistence
 
-**Version:** 1.0 · **Date:** February 2026 · **Status:** Draft
+**Version:** 1.0 · **Date:** March 2026 · **Status:** Phase 1 & 2 complete
 
 ---
 
@@ -44,7 +44,7 @@ A dashcam solves an analogous problem for drivers: it records continuously but o
 - **Multi-Instance:** Multiple independent instances for different interfaces on the same host, with proper isolation and locking.
 - **Configurable Exclusions:** BPF-based traffic filters to exclude known-benign high-volume traffic from capture, preserving ring buffer space for relevant packets.
 - **Flexible Buffer Limits:** Buffer size configurable by total size, number of segments, or time-based retention duration.
-- **Single Binary Deployment:** No runtime dependencies beyond Npcap on Windows. Easy to deploy across a fleet.
+- **Single Binary Deployment:** Single binary with only libpcap (Linux/macOS) or Npcap (Windows) as runtime dependency. Easy to deploy across a fleet.
 
 ### 3.2 Non-Goals
 
@@ -65,7 +65,7 @@ A dashcam solves an analogous problem for drivers: it records continuously but o
         │
         ▼
   ┌───────────────────────┐
-  │   Capture Engine       │   AF_PACKET (Linux) / Npcap (Windows) / libpcap (macOS)
+  │   Capture Engine       │   libpcap (Linux/macOS) / Npcap (Windows)
   │   + BPF Exclusions     │   Kernel-level filtering before userspace copy
   └───────────┬────────────┘
               │ raw packets
@@ -85,8 +85,8 @@ A dashcam solves an analogous problem for drivers: it records continuously but o
               │ on trigger
               ▼
   ┌───────────────────────┐
-  │   Persistence Layer    │   Copies/hardlinks triggered segments
-  │   + Metadata           │   Writes trigger metadata (time, source, window)
+  │   Persistence Layer    │   Merges segments into zstd-compressed capture
+  │   + Metadata           │   Writes trigger metadata + capture statistics
   └───────────────────────┘
 ```
 
@@ -114,8 +114,8 @@ A dashcam solves an analogous problem for drivers: it records continuously but o
 Go was chosen for the following reasons:
 
 - **Performance:** Compiled language with low-latency goroutine scheduling, suitable for continuous packet processing.
-- **gopacket Ecosystem:** Mature bindings for both libpcap/Npcap (cross-platform) and AF_PACKET (Linux fast path), with a unified API.
-- **Single Binary:** Statically linked binaries with no runtime dependencies. Ideal for deployment across heterogeneous endpoints.
+- **gopacket Ecosystem:** Mature bindings for libpcap/Npcap (cross-platform) with a unified API.
+- **Single Binary:** Compiles to a single binary. The only runtime dependency is libpcap (Linux/macOS) or Npcap (Windows). Ideal for deployment across heterogeneous endpoints.
 - **Concurrency Model:** Goroutines and channels naturally model the parallel concerns of capture, buffer management, API serving, and trigger handling.
 - **Cross-Compilation:** Native cross-compilation (GOOS/GOARCH) simplifies multi-platform builds, though cgo is required for libpcap bindings.
 
@@ -123,17 +123,17 @@ Alternatives considered: Python was rejected due to insufficient performance for
 
 ### 5.2 Capture Backend
 
-The capture backend is abstracted behind a common interface, with platform-specific implementations:
+The capture backend uses `gopacket/pcap` which wraps libpcap (Linux/macOS) and Npcap (Windows), providing a single cross-platform API. The backend is abstracted behind a `capture.Source` interface, allowing alternative implementations in the future.
 
-| Platform | Primary Backend           | Filter Mechanism     | Zero-Copy              |
-| -------- | ------------------------- | -------------------- | ---------------------- |
-| Linux    | AF_PACKET v3 (MMAP)       | cBPF at socket level | Yes (kernel MMAP ring) |
-| Windows  | Npcap (WinPcap successor) | WinPcap BPF filter   | Npcap kernel buffer    |
-| macOS    | libpcap (BPF native)      | BPF native           | Yes (BPF device)       |
+| Platform | Backend                   | Filter Mechanism   |
+| -------- | ------------------------- | ------------------ |
+| Linux    | libpcap                   | BPF filter         |
+| Windows  | Npcap (WinPcap successor) | WinPcap BPF filter |
+| macOS    | libpcap (BPF native)      | BPF native         |
 
-The default cross-platform backend uses `gopacket/pcap` which wraps libpcap (Linux/macOS) and Npcap (Windows). On Linux, an optional fast path via `gopacket/afpacket` provides zero-copy capture with kernel-managed MMAP ring buffers for higher throughput scenarios.
+**Windows Dependency:** Npcap must be installed on Windows hosts. This is the same dependency required by Wireshark and is standard in security tooling environments. Bundled installation (requiring an OEM license) may be considered for future fleet deployment.
 
-**Windows Dependency:** Npcap must be installed on Windows hosts. This is the same dependency required by Wireshark and is standard in security tooling environments. For Phase 1, Npcap is treated as a prerequisite. Bundled installation (requiring an OEM license) may be considered for future fleet deployment.
+*Future consideration:* On Linux, `gopacket/afpacket` could provide zero-copy capture via AF_PACKET v3 with kernel-managed MMAP ring buffers for higher throughput scenarios.
 
 ### 5.3 Output Format: pcapng
 
@@ -149,7 +149,7 @@ pcapng (PCAP Next Generation) was chosen over legacy pcap for the following adva
 
 The ring buffer is implemented as a fixed number of pre-allocated pcapng segment files on disk:
 
-- **Pre-Allocation at Startup:** All segment files are created with their full size using `fallocate` (Linux) or `SetEndOfFile` (Windows) when the instance starts. The total disk footprint is known and constant from the first second of operation.
+- **Pre-Allocation at Startup:** All segment files are created with their full size using `fallocate` (Linux), `fcntl(F_PREALLOCATE)` (macOS), or `SetEndOfFile` (Windows) when the instance starts. The total disk footprint is known and constant from the first second of operation.
 - **No Runtime Growth:** Since all files are pre-allocated, the instance never increases its disk usage during operation. New data overwrites existing segments in-place.
 - **Rotation by Overwrite:** When the ring is full, the oldest segment is truncated, re-allocated, and rewritten. No file creation or deletion during steady-state operation.
 - **Startup Safety Check:** Before pre-allocating, the instance checks that sufficient free disk space remains after allocation. If the allocation would leave less than a configurable minimum (default: 1 GB or 5% of partition, whichever is larger), the instance refuses to start with a clear error message.
@@ -165,7 +165,7 @@ When a trigger is received:
 1. **Timestamp Recording:** The exact time of the trigger is recorded.
 2. **Window Selection:** All segments covering the requested time window are identified. The window is either the configured default duration (e.g., 5 minutes before the trigger), an explicit duration, or an absolute start time (`since`).
 3. **Persistence:** The identified segments are merged into a single zstd-compressed `capture.pcapng.zst` in a timestamped directory under `saved/`. Packet-header statistics (protocol distribution, top IPs/MACs) are collected during the merge pass.
-4. **Metadata:** A JSON metadata file is written alongside the capture, containing trigger timestamp, source, requested duration, segment count, and capture path.
+4. **Metadata:** A JSON metadata file is written alongside the capture, containing trigger timestamp, source, requested duration, actual time window, capture path, and capture statistics.
 
 ---
 
@@ -186,7 +186,7 @@ The segment writer receives packets from the capture engine and writes them into
 - Each segment file has a maximum size (configurable, default 100 MB).
 - When the current segment reaches its size limit, the writer advances to the next segment in the ring, re-initializing the file with a new Section Header Block.
 - The writer tracks start and end timestamps, packet count, and byte count for each segment. This metadata is used for trigger window calculations.
-- *Planned:* Embedding dashcap metadata (hostname, interface name, version) in pcapng Section Header Block options (`shb_userappl`, `shb_comment`), making captures self-describing and visible in Wireshark's section properties.
+- Embeds dashcap metadata (hostname, interface name, version) in pcapng Section Header Block options (`shb_userappl`, `shb_comment`), making captures self-describing and visible in Wireshark's section properties.
 
 ### 6.3 Ring Manager
 
@@ -206,7 +206,7 @@ The trigger dispatcher receives trigger requests from the REST API and orchestra
 - Calculates which ring segments fall within the requested time window based on segment timestamps.
 - Hands off the segment list to the persistence layer.
 - Returns a trigger ID and status to the caller.
-- *Planned:* Debouncing to reject duplicate triggers within a configurable window.
+- Debouncing with a 5-second cooldown between triggers. Duplicate triggers within the cooldown window are rejected with a 429 response.
 
 ### 6.5 Persistence Layer
 
@@ -221,13 +221,14 @@ The trigger dispatcher receives trigger requests from the REST API and orchestra
 
 The REST API provides programmatic control over the dashcap instance, served via HTTP on a configurable TCP port.
 
-| Method | Endpoint           | Description                                                              |
-| ------ | ------------------ | ------------------------------------------------------------------------ |
-| `GET`  | `/api/v1/health`   | Liveness check — returns `{"status": "ok"}`                              |
-| `GET`  | `/api/v1/status`   | Instance status: interface, uptime, packet/byte counts                   |
-| `POST` | `/api/v1/trigger`  | Trigger a save. Optional JSON body with `duration` or `since` overrides  |
-| `GET`  | `/api/v1/triggers` | List all trigger records (newest first)                                  |
-| `GET`  | `/api/v1/ring`     | Per-segment metadata: index, path, timestamps, packet/byte counts        |
+| Method | Endpoint               | Description                                                             |
+| ------ | ---------------------- | ----------------------------------------------------------------------- |
+| `GET`  | `/api/v1/health`       | Liveness check — returns `{"status": "ok"}`                             |
+| `GET`  | `/api/v1/status`       | Instance status: interface, uptime, packet/byte counts                  |
+| `POST` | `/api/v1/trigger`      | Trigger a save. Optional JSON body with `duration` or `since` overrides |
+| `GET`  | `/api/v1/trigger/{id}` | Per-trigger status, metadata, and capture statistics (200/202/404)      |
+| `GET`  | `/api/v1/triggers`     | List all trigger records (newest first)                                 |
+| `GET`  | `/api/v1/ring`         | Per-segment metadata: index, path, timestamps, packet/byte counts       |
 
 *Planned:*
 - `PUT /api/v1/filters` — Update BPF exclusion filters (hot reload)
@@ -238,7 +239,7 @@ The API uses standard HTTP status codes and returns JSON. All endpoints except `
 
 ## 7. Configuration
 
-dashcap is currently configured exclusively via CLI flags. YAML configuration file support is planned (Phase 2), with CLI flags taking precedence over config file values. Each instance reads its own configuration — there is no global shared config.
+dashcap supports both CLI flags and a YAML configuration file. CLI flags always take precedence over config file values. Each instance reads its own configuration — there is no global shared config.
 
 ### 7.1 Configuration File
 
@@ -255,35 +256,35 @@ buffer:
 
 trigger:
   default_duration: 5m   # Default time window to save on trigger
-  debounce: 10s          # Min time between triggers
 
 safety:
-  min_free_after_alloc: 1GB   # Min free disk after preallocation
-  min_free_percent: 5         # Alternative: min % free after prealloc
+  min_free_after_alloc: 5GB  # Min free disk after preallocation
+  min_free_percent: 15       # Alternative: min % free after prealloc
 
 api:
-  socket: /run/dashcap/eth0.sock   # Unix socket (Linux/macOS)
-  # pipe: dashcap-eth0             # Named pipe name (Windows)
-  tcp_port: 0                      # 0 = disabled, >0 = enable TCP API
+  tcp_port: 9800               # 0 = disabled, >0 = enable TCP REST API
+  token: ""                    # Bearer token for API auth (empty = auto-generated)
+  no_auth: false               # Disable API authentication entirely
+  tls_cert: ""                 # Path to TLS certificate file
+  tls_key: ""                  # Path to TLS private key file
 
 capture:
-  backend: auto          # auto | pcap | afpacket (Linux only)
   snaplen: 0             # 0 = full packets, >0 = truncate
   promiscuous: true
 
-exclusions:
-  - name: backup_traffic
-    filter: "host 10.0.0.50 and port 443"
-  - name: dns_noise
-    filter: "udp port 53 and host 10.0.0.1"
+# BPF exclusion filters — exclude known-benign high-volume traffic from capture.
+# Each entry has a name (for logging) and a BPF filter expression (tcpdump syntax).
+# exclusions:
+#   - name: backup_traffic
+#     filter: "host 10.0.0.50 and port 443"
+#   - name: dns_noise
+#     filter: "udp port 53 and host 10.0.0.1"
 
 storage:
   data_dir: /var/lib/dashcap/eth0   # Base directory for this instance
-  saved_dir: saved                   # Subdir for triggered captures
 
 logging:
-  level: info            # debug | info | warn | error
-  format: json           # json | text
+  level: info            # debug | info (debug enables verbose output)
 ```
 
 ### 7.2 CLI Flags
@@ -312,13 +313,9 @@ To prevent two instances from capturing on the same interface, each acquires an 
 | -------- | ------------------------------------------------------- | --------------------------------------- |
 | Linux    | `/run/dashcap/dashcap-{interface}.lock`                 | `flock()` — auto-released on crash      |
 | Windows  | `C:\ProgramData\dashcap\locks\dashcap-{interface}.lock` | `LockFileEx()` — auto-released on crash |
-| macOS    | `/var/run/dashcap/dashcap-{interface}.lock`             | `flock()`                               |
+| macOS    | `/run/dashcap/dashcap-{interface}.lock`                 | `flock()`                               |
 
-The lock file contains the PID of the owning process. If already held, the new instance exits with:
-
-```
-Error: interface eth0 already captured by dashcap (PID 4271)
-```
+The lock is acquired via `flock()` (Unix) or `LockFileEx()` (Windows). If already held, the new instance exits with an error identifying the interface and lock file path.
 
 ### 8.3 Data Directory Layout
 
@@ -361,7 +358,7 @@ Description=dashcap packet capture on %i
 After=network-online.target
 
 [Service]
-Type=notify
+Type=simple
 ExecStart=/usr/local/bin/dashcap --interface %i
 RuntimeDirectory=dashcap
 StateDirectory=dashcap/%i
@@ -379,7 +376,7 @@ systemctl enable --now dashcap@eth1
 journalctl -u dashcap@eth0 -f
 ```
 
-**Windows (service per interface):**
+**Windows (service per interface)** *(planned — Phase 3):*
 
 ```powershell
 dashcap.exe install --interface "Ethernet 2"
@@ -389,7 +386,7 @@ dashcap.exe install --interface "Wi-Fi"
 # → Registers service: dashcap_wi-fi
 ```
 
-Each service is a separate instance of the same binary with different arguments, using Go's `golang.org/x/sys/windows/svc` package.
+Each service would be a separate instance of the same binary with different arguments, using Go's `golang.org/x/sys/windows/svc` package.
 
 ---
 
@@ -397,17 +394,17 @@ Each service is a separate instance of the same binary with different arguments,
 
 Platform-specific code is isolated using Go build tags (`//go:build linux`, `//go:build windows`, `//go:build darwin`). Each difference is encapsulated behind a common interface:
 
-| Concern             | Linux                   | Windows                         | macOS                  |
-| ------------------- | ----------------------- | ------------------------------- | ---------------------- |
-| Capture             | libpcap                 | Npcap                           | libpcap                |
-| File locking        | `flock()`               | `LockFileEx()`                  | `flock()`              |
-| Pre-allocation      | `fallocate()`           | `SetEndOfFile()`                | `fcntl(F_PREALLOCATE)` |
-| Free disk space     | `statfs()`              | `GetDiskFreeSpaceEx()`          | `statfs()`             |
-| Local API *(planned)* | Unix socket           | —                               | Unix socket            |
-| Service *(planned)* | systemd (template unit) | Windows Service (SCM)           | launchd (plist)        |
-| Default data dir    | `/var/lib/dashcap/`     | `C:\ProgramData\dashcap\`       | `/var/lib/dashcap/`    |
-| Default lock dir    | `/run/dashcap/`         | `C:\ProgramData\dashcap\locks\` | `/var/run/dashcap/`    |
-| Permissions         | `CAP_NET_RAW`           | Administrator / Npcap group     | root / BPF group       |
+| Concern               | Linux                   | Windows                         | macOS                  |
+| --------------------- | ----------------------- | ------------------------------- | ---------------------- |
+| Capture               | libpcap                 | Npcap                           | libpcap                |
+| File locking          | `flock()`               | `LockFileEx()`                  | `flock()`              |
+| Pre-allocation        | `fallocate()`           | `SetEndOfFile()`                | `fcntl(F_PREALLOCATE)` |
+| Free disk space       | `statfs()`              | `GetDiskFreeSpaceEx()`          | `statfs()`             |
+| Local API *(planned)* | Unix socket             | —                               | Unix socket            |
+| Service *(planned)*   | systemd (template unit) | Windows Service (SCM)           | launchd (plist)        |
+| Default data dir      | `/var/lib/dashcap/`     | `C:\ProgramData\dashcap\`       | `/var/lib/dashcap/`    |
+| Default lock dir      | `/run/dashcap/`         | `C:\ProgramData\dashcap\locks\` | `/run/dashcap/`        |
+| Permissions           | `CAP_NET_RAW`           | Administrator / Npcap group     | root / BPF group       |
 
 ---
 
@@ -452,13 +449,16 @@ dashcap/
 │   ├── client/                # HTTP client for REST API (used by `dashcap client`)
 │   │   └── client.go
 │   ├── config/                # Runtime configuration + validation
-│   │   └── config.go
+│   │   ├── config.go          # Config struct, defaults, validation
+│   │   ├── load.go            # YAML config file loading
+│   │   └── size.go            # Human-readable size parsing (e.g. "2GB")
 │   ├── persist/               # Save/export logic
-│   │   └── persist.go         # Segment merge + metadata
+│   │   ├── persist.go         # Segment merge + zstd compression
+│   │   └── stats.go           # Capture statistics collection
 │   ├── storage/               # Disk operations (platform-specific)
 │   │   ├── storage.go         # Interface (prealloc, flock, free space)
 │   │   ├── disk_unix.go       # flock, statfs (Linux/macOS)
-│   │   ├── disk_windows.go    # LockFileEx, GetDiskFreeSpaceEx
+│   │   ├── disk_windows.go    # LockFileEx, GetDiskFreeSpaceEx, SetEndOfFile
 │   │   ├── prealloc_linux.go  # fallocate
 │   │   └── prealloc_darwin.go # fcntl(F_PREALLOCATE)
 │   └── trigger/               # Trigger dispatcher
@@ -498,14 +498,14 @@ dashcap/
 - GitHub Actions CI (lint, test, build) and release workflows (cross-compile + GitHub Releases)
 - Dependabot for Go module and Actions version updates
 
-### Phase 2 — Configuration & Filters
+### Phase 2 — Configuration & Filters *(complete)*
 
 *Goal: Production-ready configuration and traffic filtering.*
 
-- YAML configuration file support
-- BPF exclusion filters (compile and apply from config, expose active filter in `/status`)
-- `GET /api/v1/triggers/{id}` endpoint to retrieve trigger metadata and capture statistics
-- Capture metadata extracted from pcapng and included in metadata (IP addresses, protocols, packet counts per protocol) — enables quick triage without opening Wireshark
+- YAML configuration file support with CLI flag precedence
+- BPF exclusion filters (compile and apply from config/CLI, expose active filter in `/status`)
+- `GET /api/v1/trigger/{id}` endpoint to retrieve trigger status, metadata, and capture statistics
+- Trigger debouncing (5-second cooldown, 429 response)
 - Embedding dashcap metadata in pcapng Section Header Block options (`shb_userappl`, `shb_comment`)
 
 ### Phase 3 — Production Hardening
@@ -522,7 +522,7 @@ dashcap/
 
 - Hot-reload of BPF exclusion filters via API (`PUT /api/v1/filters`)
 - Unix socket API endpoint (Linux/macOS)
-- Trigger debouncing and API rate limiting (429 response, `Retry-After` header)
+- API rate limiting with configurable thresholds (`Retry-After` header)
 - Saved capture retention policies (auto-cleanup by age/count)
 - Prometheus metrics endpoint
 
