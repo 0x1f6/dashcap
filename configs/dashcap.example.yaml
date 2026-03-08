@@ -18,6 +18,7 @@ safety:
 api:
   tcp_port: 9800             # 0 = disabled; >0 = enable TCP REST API
   token: ""                  # Bearer token for API auth (empty = auto-generated)
+  token_file: /etc/dashcap/api-token  # Path to API token file (read/write)
   no_auth: false             # Disable API authentication entirely
   tls_cert: ""               # Path to TLS certificate file
   tls_key: ""                # Path to TLS private key file

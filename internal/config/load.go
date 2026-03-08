@@ -38,11 +38,12 @@ type fileSafety struct {
 }
 
 type fileAPI struct {
-	TCPPort int    `yaml:"tcp_port"`
-	Token   string `yaml:"token"`
-	NoAuth  bool   `yaml:"no_auth"`
-	TLSCert string `yaml:"tls_cert"`
-	TLSKey  string `yaml:"tls_key"`
+	TCPPort   int    `yaml:"tcp_port"`
+	Token     string `yaml:"token"`
+	NoAuth    bool   `yaml:"no_auth"`
+	TLSCert   string `yaml:"tls_cert"`
+	TLSKey    string `yaml:"tls_key"`
+	TokenFile string `yaml:"token_file"`
 }
 
 type fileCapture struct {
@@ -124,6 +125,9 @@ func LoadFile(path string) (*Config, error) {
 	}
 	if fc.API.TLSKey != "" {
 		cfg.TLSKey = fc.API.TLSKey
+	}
+	if fc.API.TokenFile != "" {
+		cfg.TokenFile = fc.API.TokenFile
 	}
 	if fc.Capture.SnapLen != 0 {
 		cfg.SnapLen = fc.Capture.SnapLen

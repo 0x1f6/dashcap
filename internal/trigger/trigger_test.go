@@ -194,6 +194,29 @@ func TestGetNonExistentTrigger(t *testing.T) {
 	}
 }
 
+func TestSignalSourceInHistory(t *testing.T) {
+	cfg, ring := newTriggerTestSetup(t)
+	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})
+
+	rec, err := d.Trigger("signal", trigger.TriggerOpts{})
+	if err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if rec.Source != "signal" {
+		t.Errorf("Source: got %q, want %q", rec.Source, "signal")
+	}
+
+	waitForAllComplete(t, d, 1)
+
+	history := d.History()
+	if len(history) != 1 {
+		t.Fatalf("History len: got %d, want 1", len(history))
+	}
+	if history[0].Source != "signal" {
+		t.Errorf("History source: got %q, want %q", history[0].Source, "signal")
+	}
+}
+
 func TestConcurrentTriggersSafe(t *testing.T) {
 	cfg, ring := newTriggerTestSetup(t)
 	d := trigger.NewDispatcher(cfg, ring, buffer.SHBInfo{})

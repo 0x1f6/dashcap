@@ -1,0 +1,8 @@
+# Create dashcap runtime directories with correct ownership.
+# Processed by systemd-tmpfiles during package installation and boot.
+# See tmpfiles.d(5) for syntax.
+
+# Type Path                   Mode User    Group   Age
+d      /etc/dashcap           0750 root    dashcap -
+d      /run/dashcap           0750 dashcap dashcap -
+d      /var/lib/dashcap       0750 dashcap dashcap -

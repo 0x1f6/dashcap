@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"runtime"
 	"time"
 )
 
@@ -30,6 +31,7 @@ type Config struct {
 	APIPort   int    // TCP port for REST API (0 = disabled)
 	APIToken  string // Bearer token for API auth (auto-generated if empty)
 	APINoAuth bool   // Disable API authentication entirely
+	TokenFile string // Path to API token file (default: /etc/dashcap/api-token)
 
 	// TLS
 	TLSCert string // Path to TLS certificate file
@@ -62,6 +64,7 @@ func Defaults() *Config {
 		SegmentCount:      20,
 		SavedDir:          "saved",
 		APIPort:           9800,
+		TokenFile:         DefaultTokenFile(),
 		DefaultDuration:   5 * time.Minute,
 		SnapLen:           0,
 		Promiscuous:       true,
@@ -115,6 +118,14 @@ func BuildBPFFilter(exclusions []Exclusion) string {
 		result += " and " + p
 	}
 	return result
+}
+
+// DefaultTokenFile returns the platform-specific default API token file path.
+func DefaultTokenFile() string {
+	if runtime.GOOS == "windows" {
+		return `C:\ProgramData\dashcap\api-token`
+	}
+	return "/etc/dashcap/api-token"
 }
 
 // errorf is a simple error helper to avoid importing fmt in this package alone.

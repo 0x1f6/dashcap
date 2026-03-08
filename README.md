@@ -21,7 +21,7 @@ Network Interface → Capture Engine → Segment Writer → Ring Buffer (fixed s
 
 ## Status
 
-**Phase 1 (MVP) and Phase 2 (Configuration & Filters) are complete.** The core capture-to-disk pipeline with REST API triggers, YAML configuration, BPF exclusion filters, and per-trigger status tracking works on Linux. See [DESIGN.md](DESIGN.md) for the full roadmap.
+**Phase 1 (MVP), Phase 2 (Configuration & Filters), and Phase 3 (systemd Service) are complete.** The core capture-to-disk pipeline with REST API triggers, YAML configuration, BPF exclusion filters, per-trigger status tracking, and systemd service integration works on Linux. See [DESIGN.md](DESIGN.md) for the full roadmap.
 
 What's implemented:
 - `gopacket/pcap` capture backend (cross-platform)
@@ -42,6 +42,12 @@ What's implemented:
 - Trigger debouncing (5s cooldown, 429 response)
 - pcapng Section Header Block metadata (dashcap version, hostname, interface)
 - Structured logging (`log/slog`) with `--debug` flag for verbose output
+- systemd template unit (`dashcap@.service`) with `Type=notify` readiness
+- Dedicated `dashcap` system user/group with capability-based security (no root)
+- API token file (`/etc/dashcap/api-token`) with group-based access control
+- SIGUSR1 signal trigger for default-duration captures
+- `dashcap install-service` command for standalone deployments
+- `sd_notify` integration for accurate service readiness reporting
 
 ## Prerequisites
 
@@ -180,6 +186,47 @@ curl -s -H "Authorization: Bearer <token>" http://127.0.0.1:9800/api/v1/ring | p
 
 Press `Ctrl+C` or send `SIGTERM` — dashcap flushes the active segment and exits cleanly.
 
+## systemd Service
+
+dashcap ships with a systemd template unit for production deployment on Linux.
+
+### Install (standalone binary)
+
+```bash
+sudo dashcap install-service
+```
+
+This creates the `dashcap` system user/group, installs the unit file, and runs `daemon-reload`. For RPM/DEB packages, this is handled automatically.
+
+### Enable and start
+
+```bash
+sudo systemctl enable --now dashcap@eth0
+```
+
+### Grant trigger access
+
+Only members of the `dashcap` group can read the API token and trigger captures:
+
+```bash
+sudo usermod -aG dashcap <username>
+# User must log out and back in for group change to take effect
+```
+
+### Trigger via signal
+
+For simple default-duration triggers (e.g. from cron or scripts):
+
+```bash
+systemctl kill --signal=USR1 dashcap@eth0
+```
+
+### View logs
+
+```bash
+journalctl -u dashcap@eth0 -f
+```
+
 ## CLI Reference
 
 ### Server Flags
@@ -202,6 +249,7 @@ These flags configure the capture daemon (the root `dashcap` command):
 | `--promiscuous` | `true` | Enable promiscuous mode on the interface |
 | `--snaplen` | `0` | Snapshot length (`0` = full packets) |
 | `--exclude` | | BPF exclusion filter expression, tcpdump syntax (e.g. `"host 10.0.0.50"`) |
+| `--token-file` | `/etc/dashcap/api-token` | Path to API token file |
 | `--debug` | `false` | Enable debug-level logging (ring rotations, packet details) |
 
 ### Client Flags
@@ -212,7 +260,8 @@ These flags configure the `dashcap client` subcommand group for interacting with
 |------|---------|-------------|
 | `--host` | `localhost` | API server host |
 | `--port` | `9800` | API server port |
-| `--token` | | Bearer token (falls back to `$DASHCAP_API_TOKEN`) |
+| `--token` | | Bearer token (falls back to `$DASHCAP_API_TOKEN`, then token file) |
+| `--token-file` | `/etc/dashcap/api-token` | Path to API token file |
 | `--tls` | `false` | Use HTTPS |
 | `--tls-skip-verify` | `false` | Skip TLS certificate verification |
 | `--pretty` | *(auto)* | Force human-readable output |
@@ -237,13 +286,15 @@ dashcap client trigger --duration 30s   # Trigger with custom duration
 dashcap client trigger --since 2024-01-01T00:00:00Z  # Trigger from specific time
 dashcap client triggers        # List trigger history
 dashcap client ring            # Show ring buffer segment metadata
+dashcap token-init             # Initialize API token file (requires root)
+dashcap install-service        # Install systemd unit + user/group (requires root)
 ```
 
 ## REST API
 
 All endpoints return JSON. The API listens on the port specified by `--api-port`. See [`api/openapi.yaml`](api/openapi.yaml) for the full OpenAPI 3.1 specification.
 
-**Authentication:** All endpoints except `/health` require a bearer token. Include the header `Authorization: Bearer <token>` with every request. The token is printed to stderr at startup. Disable auth with `--no-auth`.
+**Authentication:** All endpoints except `/health` require a bearer token. Include the header `Authorization: Bearer <token>` with every request. The token is resolved from: `--api-token` flag → `DASHCAP_API_TOKEN` env → `/etc/dashcap/api-token` file → auto-generated (logged to stderr). Disable auth with `--no-auth`.
 
 **TLS:** Pass `--tls-cert` and `--tls-key` to enable HTTPS. Without TLS, tokens are sent in cleartext (a warning is logged).
 

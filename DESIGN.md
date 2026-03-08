@@ -349,30 +349,24 @@ dashcap client trigger --host 10.0.0.5 --port 8080    # Trigger on remote
 
 ### 8.5 Service Integration
 
-**Linux (systemd template unit):**
+**Linux (systemd template unit) — implemented:**
 
-```ini
-# /etc/systemd/system/dashcap@.service
-[Unit]
-Description=dashcap packet capture on %i
-After=network-online.target
+The template unit `dashcap@.service` uses `Type=notify` with `sd_notify(READY=1)`, runs as a dedicated `dashcap` user with ambient capabilities, and includes comprehensive sandboxing. API token initialization runs via `ExecStartPre=+` (as root) before the main process starts.
 
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/dashcap --interface %i
-RuntimeDirectory=dashcap
-StateDirectory=dashcap/%i
-AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
-ProtectSystem=strict
-ReadWritePaths=/var/lib/dashcap/%i
-
-[Install]
-WantedBy=multi-user.target
+Install via package (RPM/DEB) or standalone:
+```bash
+sudo dashcap install-service          # standalone binary install
+sudo systemctl enable --now dashcap@eth0
+sudo usermod -aG dashcap <operator>   # grant trigger access
 ```
 
+**Trigger mechanisms:**
+- API: `dashcap client trigger` (reads token from `/etc/dashcap/api-token`)
+- Signal: `systemctl kill --signal=USR1 dashcap@eth0` (default-duration only)
+
+**Access control:** Members of the `dashcap` group can read the API token file (`0640 root:dashcap`) and trigger captures. Non-members cannot.
+
 ```bash
-systemctl enable --now dashcap@eth0
-systemctl enable --now dashcap@eth1
 journalctl -u dashcap@eth0 -f
 ```
 
@@ -512,7 +506,18 @@ dashcap/
 
 *Goal: Reliable operation as a system service.*
 
-- systemd template unit with `sd_notify` integration
+*Done (Linux systemd):*
+- systemd template unit (`dashcap@.service`) with `Type=notify` and `sd_notify(READY=1)` integration
+- Dedicated `dashcap` system user/group with `CAP_NET_RAW`/`CAP_NET_ADMIN` (no root at runtime)
+- API token file persistence (`/etc/dashcap/api-token`) with group-based access control (`0640 root:dashcap`)
+- SIGUSR1 signal trigger for default-duration captures (works with `systemctl kill`)
+- `dashcap install-service` self-install command for standalone binary deployments (embedded via `go:embed`)
+- `dashcap token-init` subcommand for token file initialization (`ExecStartPre=+`)
+- sysusers.d / tmpfiles.d drop-ins for RPM/DEB packaging
+- Secure token logging (only auto-generated tokens logged; flag/env/file sources log mechanism only)
+- Service hardening (ProtectSystem=strict, PrivateTmp, NoNewPrivileges, etc.)
+
+*Remaining:*
 - Windows Service registration and lifecycle management
 - Process resource limits (systemd `MemoryMax`, Windows job objects)
 

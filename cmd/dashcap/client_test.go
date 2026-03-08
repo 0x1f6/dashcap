@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -38,4 +39,36 @@ func TestUsePrettyAutoDetect(t *testing.T) {
 			t.Error("usePretty() = true, want false (not a TTY)")
 		}
 	}
+}
+
+func TestClientTokenResolution_FileFallback(t *testing.T) {
+	t.Setenv("DASHCAP_API_TOKEN", "")
+
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "api-token")
+	if err := os.WriteFile(tokenPath, []byte("file-token\n"), 0o640); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	f := &clientFlags{
+		host:      "localhost",
+		port:      9800,
+		tokenFile: tokenPath,
+	}
+	// newClient should pick up the token from the file without panicking.
+	c := f.newClient()
+	_ = c
+}
+
+func TestClientTokenResolution_NoToken(t *testing.T) {
+	t.Setenv("DASHCAP_API_TOKEN", "")
+
+	f := &clientFlags{
+		host:      "localhost",
+		port:      9800,
+		tokenFile: "/nonexistent/path",
+	}
+	// Should not panic; client created without token.
+	c := f.newClient()
+	_ = c
 }

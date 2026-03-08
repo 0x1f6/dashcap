@@ -1,0 +1,5 @@
+# Create dashcap system user and group for the dashcap service.
+# Processed by systemd-sysusers during package installation.
+# See sysusers.d(5) for syntax.
+
+u dashcap - "dashcap service"

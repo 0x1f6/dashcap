@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"dashcap/internal/buffer"
 	"dashcap/internal/capture"
 	"dashcap/internal/config"
+	"dashcap/internal/notify"
 	"dashcap/internal/storage"
 	"dashcap/internal/trigger"
 )
@@ -114,11 +116,14 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&cfg.APINoAuth, "no-auth", false, "Disable API authentication")
 	cmd.Flags().StringVar(&cfg.TLSCert, "tls-cert", "", "Path to TLS certificate file")
 	cmd.Flags().StringVar(&cfg.TLSKey, "tls-key", "", "Path to TLS private key file")
+	cmd.Flags().StringVar(&cfg.TokenFile, "token-file", cfg.TokenFile, "Path to API token file")
 	cmd.Flags().BoolVar(&cfg.Debug, "debug", false, "Enable debug-level logging")
 	cmd.Flags().StringVar(&excludeExpr, "exclude", "", "BPF exclusion filter expression (tcpdump syntax)")
 
 	cmd.AddCommand(versionCmd())
 	cmd.AddCommand(clientCmd())
+	cmd.AddCommand(tokenInitCmd())
+	cmd.AddCommand(installServiceCmd())
 	return cmd
 }
 
@@ -148,6 +153,9 @@ func applyFlags(cmd *cobra.Command, cfg *config.Config) {
 	}
 	if f.Changed("no-auth") {
 		cfg.APINoAuth, _ = f.GetBool("no-auth")
+	}
+	if f.Changed("token-file") {
+		cfg.TokenFile, _ = f.GetString("token-file")
 	}
 	if f.Changed("tls-cert") {
 		cfg.TLSCert, _ = f.GetString("tls-cert")
@@ -191,10 +199,19 @@ func run(cfg *config.Config) error {
 		return err
 	}
 
-	// Resolve API token: --api-token flag > DASHCAP_API_TOKEN env > auto-generated
+	// Resolve API token: flag → env → file → auto-generate
 	if !cfg.APINoAuth && cfg.APIPort > 0 {
-		if cfg.APIToken == "" {
+		switch {
+		case cfg.APIToken != "":
+			slog.Info("API token configured", "source", "flag")
+		case os.Getenv("DASHCAP_API_TOKEN") != "":
 			cfg.APIToken = os.Getenv("DASHCAP_API_TOKEN")
+			slog.Info("API token configured", "source", "env")
+		case cfg.TokenFile != "":
+			if data, err := os.ReadFile(cfg.TokenFile); err == nil && len(data) > 0 {
+				cfg.APIToken = strings.TrimSpace(string(data))
+				slog.Info("API token configured", "source", "file", "path", cfg.TokenFile)
+			}
 		}
 		if cfg.APIToken == "" {
 			tok, err := generateToken()
@@ -202,8 +219,8 @@ func run(cfg *config.Config) error {
 				return fmt.Errorf("generate api token: %w", err)
 			}
 			cfg.APIToken = tok
+			slog.Warn("API token auto-generated (no persistent storage)", "token", tok)
 		}
-		slog.Info("API token generated", "token", cfg.APIToken)
 	}
 
 	slog.Info("dashcap starting", "version", version, "interface", cfg.Interface)
@@ -290,6 +307,9 @@ func run(cfg *config.Config) error {
 		}()
 	}
 
+	// Signal readiness to systemd (no-op when not running under systemd)
+	notify.Ready()
+
 	// Capture loop
 	captureDone := make(chan struct{})
 	go func() {
@@ -297,11 +317,24 @@ func run(cfg *config.Config) error {
 		close(captureDone)
 	}()
 
-	// Wait for signal
+	// SIGUSR1 trigger handler
+	usr1Ch := make(chan os.Signal, 1)
+	signal.Notify(usr1Ch, syscall.SIGUSR1)
+	go func() {
+		for range usr1Ch {
+			slog.Info("SIGUSR1 received, triggering capture save")
+			if _, err := dispatcher.Trigger("signal", trigger.TriggerOpts{}); err != nil {
+				slog.Debug("signal trigger rejected", "error", err)
+			}
+		}
+	}()
+
+	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-sigCh
 	slog.Info("received signal, shutting down", "signal", sig)
+	signal.Stop(usr1Ch)
 
 	// Graceful shutdown: stop capture source first so the loop exits,
 	// then wait for it to finish before closing the ring.

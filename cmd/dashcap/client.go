@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"dashcap/internal/client"
+	"dashcap/internal/config"
 )
 
 // ANSI color codes for pretty output.
@@ -25,6 +27,7 @@ type clientFlags struct {
 	host          string
 	port          int
 	token         string
+	tokenFile     string
 	tls           bool
 	tlsSkipVerify bool
 	pretty        bool
@@ -35,6 +38,12 @@ func (f *clientFlags) newClient() *client.Client {
 	token := f.token
 	if token == "" {
 		token = os.Getenv("DASHCAP_API_TOKEN")
+	}
+	// Fallback: read token from file.
+	if token == "" && f.tokenFile != "" {
+		if data, err := os.ReadFile(f.tokenFile); err == nil {
+			token = strings.TrimSpace(string(data))
+		}
 	}
 	return client.New(client.Options{
 		Host:          f.host,
@@ -78,6 +87,7 @@ func clientCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&flags.host, "host", "localhost", "API server host")
 	cmd.PersistentFlags().IntVar(&flags.port, "port", 9800, "API server port")
 	cmd.PersistentFlags().StringVar(&flags.token, "token", "", "Bearer token (default: $DASHCAP_API_TOKEN)")
+	cmd.PersistentFlags().StringVar(&flags.tokenFile, "token-file", config.DefaultTokenFile(), "Path to API token file")
 	cmd.PersistentFlags().BoolVar(&flags.tls, "tls", false, "Use HTTPS")
 	cmd.PersistentFlags().BoolVar(&flags.tlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification")
 	cmd.PersistentFlags().BoolVar(&flags.pretty, "pretty", false, "Force human-readable output")

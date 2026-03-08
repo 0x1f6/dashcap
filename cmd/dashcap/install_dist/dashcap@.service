@@ -1,0 +1,43 @@
+[Unit]
+Description=dashcap packet capture on %i
+Documentation=https://github.com/your-org/dashcap
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStartPre=+/usr/bin/dashcap token-init
+ExecStart=/usr/bin/dashcap --interface %i
+Restart=on-failure
+RestartSec=5
+
+# Run as dedicated dashcap user with packet capture capabilities
+User=dashcap
+Group=dashcap
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+
+# Directory management (systemd creates with correct ownership)
+RuntimeDirectory=dashcap
+StateDirectory=dashcap/%i
+
+# Grant write access to data and config directories
+ReadWritePaths=/var/lib/dashcap/%i /run/dashcap
+
+# Shutdown
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target
