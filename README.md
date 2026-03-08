@@ -241,7 +241,7 @@ dashcap client ring            # Show ring buffer segment metadata
 
 ## REST API
 
-All endpoints return JSON. The API listens on the port specified by `--api-port`.
+All endpoints return JSON. The API listens on the port specified by `--api-port`. See [`api/openapi.yaml`](api/openapi.yaml) for the full OpenAPI 3.1 specification.
 
 **Authentication:** All endpoints except `/health` require a bearer token. Include the header `Authorization: Bearer <token>` with every request. The token is printed to stderr at startup. Disable auth with `--no-auth`.
 
