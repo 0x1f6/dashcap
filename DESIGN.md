@@ -164,7 +164,7 @@ When a trigger is received:
 
 1. **Timestamp Recording:** The exact time of the trigger is recorded.
 2. **Window Selection:** All segments covering the requested time window are identified. The window is either the configured default duration (e.g., 5 minutes before the trigger), an explicit duration, or an absolute start time (`since`).
-3. **Persistence:** The identified segments are merged into a single `capture.pcapng` in a timestamped directory under `saved/`.
+3. **Persistence:** The identified segments are merged into a single zstd-compressed `capture.pcapng.zst` in a timestamped directory under `saved/`. Packet-header statistics (protocol distribution, top IPs/MACs) are collected during the merge pass.
 4. **Metadata:** A JSON metadata file is written alongside the capture, containing trigger timestamp, source, requested duration, segment count, and capture path.
 
 ---
@@ -211,8 +211,9 @@ The trigger dispatcher receives trigger requests from the REST API and orchestra
 ### 6.5 Persistence Layer
 
 - Creates a timestamped directory under `saved/` (e.g., `saved/2026-02-28T14-30-00_api/`).
-- Merges relevant ring segments into a single `capture.pcapng` file, sorted chronologically by segment start time. This handles ring buffer wraparound correctly — segments are reordered before merging.
-- Writes a `metadata.json` file containing trigger context and the path to the merged capture file.
+- Merges relevant ring segments into a single zstd-compressed `capture.pcapng.zst` file, sorted chronologically by segment start time. This handles ring buffer wraparound correctly — segments are reordered before merging.
+- Collects packet-header statistics (protocol distribution, top IPs/MACs, time span) during the merge pass with constant memory overhead.
+- Writes a `metadata.json` file containing trigger context, capture statistics, and the path to the merged capture file.
 
 **Important:** Saved captures are outside the ring buffer's pre-allocated space. Each save operation consumes additional disk space. Cleanup of old saved captures is the responsibility of external tooling or a configurable retention policy (future phase).
 
@@ -331,7 +332,7 @@ C:\ProgramData\dashcap\            # Windows base
 │   │   └── segment_002.pcapng
 │   ├── saved/                     # Triggered captures
 │   │   └── 2026-02-28T14-30-00_api/
-│   │       ├── capture.pcapng     # Merged capture (all segments)
+│   │       ├── capture.pcapng.zst  # Merged capture, zstd-compressed
 │   │       └── metadata.json
 ├── eth1/
 │   └── ...
@@ -422,7 +423,7 @@ Disk safety is achieved through **pre-allocation** rather than runtime monitorin
 
 ### 10.2 Saved Captures
 
-Saved captures (triggered persistence) are the only source of disk growth at runtime. Each save merges the relevant ring segments into a new `capture.pcapng` file, consuming additional disk space proportional to the capture window. Cleanup of old saved captures is left to external tooling or a future retention policy.
+Saved captures (triggered persistence) are the only source of disk growth at runtime. Each save merges the relevant ring segments into a new zstd-compressed `capture.pcapng.zst` file. Zstd compression typically reduces pcapng size by 3–5×, significantly lowering disk consumption per save. Cleanup of old saved captures is left to external tooling or a future retention policy.
 
 ### 10.3 Process Resource Limits
 
@@ -484,7 +485,8 @@ dashcap/
 - Ring buffer with pre-allocated segments and rotation
 - REST API with `/health`, `/status`, `/trigger`, `/triggers`, `/ring` endpoints
 - Bearer-token API authentication (auto-generated or user-supplied, TLS optional)
-- Triggered saves merge segments into a single `capture.pcapng` (chronologically sorted)
+- Triggered saves merge segments into a single zstd-compressed `capture.pcapng.zst` (chronologically sorted)
+- Capture statistics (protocol distribution, top IPs/MACs, time span) in metadata.json
 - Custom trigger time windows (`duration` or `since` parameter)
 - Interface locking via file locks
 - Built-in CLI client (`dashcap client`) with human-readable and JSON output modes
@@ -539,7 +541,7 @@ dashcap/
 
 ### 13.1 Open Questions
 
-- **Compression:** pcapng supports optional compression (e.g., zstd). Could significantly reduce disk footprint for saved captures but adds CPU overhead. Worth evaluating for saved captures (not ring segments, where write latency matters).
+- **~~Compression:~~** Resolved — saved captures are now zstd-compressed (`capture.pcapng.zst`) using streaming compression during the merge pass. Ring segments remain uncompressed for write latency.
 - **Encryption at Rest:** Saved captures contain potentially sensitive packet data. Asymmetric encryption (e.g., age/NaCl with a public key) would allow encrypting on the endpoint without storing the decryption key locally — useful for fleet deployments where the endpoint may be compromised. Symmetric encryption would require key management on the host.
 
 ### 13.2 Future Directions

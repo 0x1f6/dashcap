@@ -15,6 +15,7 @@ import (
 	"dashcap/internal/buffer"
 
 	"github.com/google/gopacket/pcapgo"
+	"github.com/klauspost/compress/zstd"
 )
 
 // SaveOpts carries time-range information from the trigger to the persist layer.
@@ -28,20 +29,22 @@ type SaveOpts struct {
 
 // TriggerMeta is written as metadata.json alongside saved captures.
 type TriggerMeta struct {
-	TriggerID         string    `json:"trigger_id"`
-	Timestamp         time.Time `json:"timestamp"`
-	Source            string    `json:"source"`
-	Interface         string    `json:"interface"`
-	DefaultDuration   string    `json:"default_duration"`
-	RequestedDuration string    `json:"requested_duration"`
-	ActualFrom        time.Time `json:"actual_from"`
-	ActualTo          time.Time `json:"actual_to"`
-	Warning           string    `json:"warning,omitempty"`
-	CapturePath       string    `json:"capture_path"`
+	TriggerID         string        `json:"trigger_id"`
+	Timestamp         time.Time     `json:"timestamp"`
+	Source            string        `json:"source"`
+	Interface         string        `json:"interface"`
+	DefaultDuration   string        `json:"default_duration"`
+	RequestedDuration string        `json:"requested_duration"`
+	ActualFrom        time.Time     `json:"actual_from"`
+	ActualTo          time.Time     `json:"actual_to"`
+	Warning           string        `json:"warning,omitempty"`
+	CapturePath       string        `json:"capture_path"`
+	Stats             *CaptureStats `json:"stats,omitempty"`
 }
 
-// SaveCapture merges the given segments into a single capture.pcapng in a
-// timestamped subdirectory of savedDir and writes a metadata.json file.
+// SaveCapture merges the given segments into a single zstd-compressed
+// capture.pcapng.zst in a timestamped subdirectory of savedDir, collects
+// packet statistics, and writes a metadata.json file.
 func SaveCapture(savedDir, triggerID, source, iface string, opts SaveOpts, segments []buffer.SegmentMeta, shb buffer.SHBInfo) (string, error) {
 	if len(segments) == 0 {
 		return "", fmt.Errorf("persist: no segments to save")
@@ -53,10 +56,38 @@ func SaveCapture(savedDir, triggerID, source, iface string, opts SaveOpts, segme
 		return "", fmt.Errorf("persist: mkdir %q: %w", destDir, err)
 	}
 
-	capturePath := filepath.Join(destDir, "capture.pcapng")
-	if err := concatSegments(capturePath, segments, shb); err != nil {
+	capturePath := filepath.Join(destDir, "capture.pcapng.zst")
+
+	// Open output file
+	out, err := os.OpenFile(capturePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("persist: create output %q: %w", capturePath, err)
+	}
+
+	// Stack: pcapng writer → zstd encoder → file
+	zw, err := zstd.NewWriter(out)
+	if err != nil {
+		_ = out.Close()
+		return "", fmt.Errorf("persist: create zstd encoder: %w", err)
+	}
+
+	stats, err := concatSegments(zw, segments, shb)
+	if err != nil {
+		_ = zw.Close()
+		_ = out.Close()
 		_ = os.Remove(capturePath)
 		return "", fmt.Errorf("persist: concat segments: %w", err)
+	}
+
+	// Close zstd encoder (writes final frame) before closing the file.
+	if err := zw.Close(); err != nil {
+		_ = out.Close()
+		_ = os.Remove(capturePath)
+		return "", fmt.Errorf("persist: close zstd encoder: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(capturePath)
+		return "", fmt.Errorf("persist: close output file: %w", err)
 	}
 
 	meta := TriggerMeta{
@@ -69,7 +100,8 @@ func SaveCapture(savedDir, triggerID, source, iface string, opts SaveOpts, segme
 		ActualFrom:        opts.ActualFrom,
 		ActualTo:          opts.ActualTo,
 		Warning:           opts.Warning,
-		CapturePath:       "capture.pcapng",
+		CapturePath:       "capture.pcapng.zst",
+		Stats:             stats,
 	}
 	metaPath := filepath.Join(destDir, "metadata.json")
 	if err := writeJSON(metaPath, meta); err != nil {
@@ -79,25 +111,20 @@ func SaveCapture(savedDir, triggerID, source, iface string, opts SaveOpts, segme
 	return destDir, nil
 }
 
-// concatSegments reads packets from all source segments (sorted by StartTime)
-// and writes them into a single pcapng file at dst.
-func concatSegments(dst string, segments []buffer.SegmentMeta, shb buffer.SHBInfo) error {
+// concatSegments reads packets from all source segments (sorted by StartTime),
+// writes them as pcapng into w, and collects packet statistics.
+func concatSegments(w io.Writer, segments []buffer.SegmentMeta, shb buffer.SHBInfo) (*CaptureStats, error) {
 	sort.Slice(segments, func(i, j int) bool {
 		return segments[i].StartTime.Before(segments[j].StartTime)
 	})
 
-	out, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("create output %q: %w", dst, err)
-	}
-	defer func() { _ = out.Close() }()
-
 	var ngw *pcapgo.NgWriter
+	sc := NewStatsCollector()
 
 	for _, seg := range segments {
 		f, err := os.Open(seg.Path)
 		if err != nil {
-			return fmt.Errorf("open segment %q: %w", seg.Path, err)
+			return nil, fmt.Errorf("open segment %q: %w", seg.Path, err)
 		}
 
 		var r io.Reader = f
@@ -108,7 +135,7 @@ func concatSegments(dst string, segments []buffer.SegmentMeta, shb buffer.SHBInf
 		ngr, err := pcapgo.NewNgReader(r, pcapgo.NgReaderOptions{})
 		if err != nil {
 			_ = f.Close()
-			return fmt.Errorf("read segment %q: %w", seg.Path, err)
+			return nil, fmt.Errorf("read segment %q: %w", seg.Path, err)
 		}
 
 		if ngw == nil {
@@ -122,10 +149,10 @@ func concatSegments(dst string, segments []buffer.SegmentMeta, shb buffer.SHBInf
 					Comment:     fmt.Sprintf("host=%s interface=%s", shb.Hostname, shb.Interface),
 				},
 			}
-			ngw, err = pcapgo.NewNgWriterInterface(out, intf, opts)
+			ngw, err = pcapgo.NewNgWriterInterface(w, intf, opts)
 			if err != nil {
 				_ = f.Close()
-				return fmt.Errorf("create pcapng writer: %w", err)
+				return nil, fmt.Errorf("create pcapng writer: %w", err)
 			}
 		}
 
@@ -136,12 +163,13 @@ func concatSegments(dst string, segments []buffer.SegmentMeta, shb buffer.SHBInf
 			}
 			if err != nil {
 				_ = f.Close()
-				return fmt.Errorf("read packet from %q: %w", seg.Path, err)
+				return nil, fmt.Errorf("read packet from %q: %w", seg.Path, err)
 			}
+			sc.Add(data, ci)
 			ci.InterfaceIndex = 0
 			if err := ngw.WritePacket(ci, data); err != nil {
 				_ = f.Close()
-				return fmt.Errorf("write packet: %w", err)
+				return nil, fmt.Errorf("write packet: %w", err)
 			}
 		}
 
@@ -150,11 +178,12 @@ func concatSegments(dst string, segments []buffer.SegmentMeta, shb buffer.SHBInf
 
 	if ngw != nil {
 		if err := ngw.Flush(); err != nil {
-			return fmt.Errorf("flush output: %w", err)
+			return nil, fmt.Errorf("flush output: %w", err)
 		}
 	}
 
-	return nil
+	stats := sc.Finalize()
+	return &stats, nil
 }
 
 func writeJSON(path string, v any) error {

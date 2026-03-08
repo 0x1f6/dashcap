@@ -11,13 +11,13 @@ dashcap continuously captures all network traffic into a pre-allocated ring buff
 ```
 Network Interface → Capture Engine → Segment Writer → Ring Buffer (fixed size, overwrites oldest)
                                                             ↓ on trigger
-                                                      Saved Captures (pcapng + metadata.json)
+                                                      Saved Captures (pcapng.zst + metadata.json)
 ```
 
 - Packets are captured via libpcap (Linux/macOS) or Npcap (Windows) and written into fixed-size pcapng segment files
 - Segments rotate in a ring — when the buffer is full, the oldest segment is overwritten
 - All disk space is pre-allocated at startup; the footprint is constant at `segment_count * segment_size`
-- A trigger merges the relevant time window into a single `capture.pcapng` in a `saved/` directory with metadata
+- A trigger merges the relevant time window into a single zstd-compressed `capture.pcapng.zst` in a `saved/` directory with metadata and capture statistics
 
 ## Status
 
@@ -31,7 +31,8 @@ What's implemented:
 - Bearer-token API authentication (enabled by default, auto-generated token)
 - TLS support for the API server (`--tls-cert` / `--tls-key`)
 - Built-in CLI client (`dashcap client`) with human-readable and JSON output modes
-- Triggered saves merge segments into a single `capture.pcapng` file
+- Triggered saves merge segments into a single zstd-compressed `capture.pcapng.zst` file
+- Capture statistics (protocol distribution, top IPs/MACs, time span) in metadata.json
 - Interface locking (one instance per interface)
 - Disk safety checks (absolute + percentage-based free space thresholds)
 - Platform-aware paths (Linux, macOS, Windows)
@@ -147,10 +148,13 @@ ls /var/lib/dashcap/lo/saved/
 # → 2026-03-02T22-30-00_api/
 
 cat /var/lib/dashcap/lo/saved/2026-03-02T22-30-00_api/metadata.json
-# → trigger metadata with capture path
+# → trigger metadata with capture path and statistics
 
-# Open in Wireshark (all segments merged into one file):
-wireshark /var/lib/dashcap/lo/saved/2026-03-02T22-30-00_api/capture.pcapng
+# Open in Wireshark ≥ 3.6 (handles .pcapng.zst natively):
+wireshark /var/lib/dashcap/lo/saved/2026-03-02T22-30-00_api/capture.pcapng.zst
+
+# Or decompress first for older Wireshark versions:
+# zstd -d capture.pcapng.zst
 ```
 
 ### 6. View ring buffer state

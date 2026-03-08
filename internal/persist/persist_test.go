@@ -16,6 +16,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
+	"github.com/klauspost/compress/zstd"
 )
 
 func defaultSaveOpts() persist.SaveOpts {
@@ -65,8 +66,8 @@ type pcapPacket struct {
 	data []byte
 }
 
-// readAllPackets reads all packets from a pcapng file and returns them.
-func readAllPackets(t *testing.T, path string) []pcapPacket {
+// readAllPacketsZst reads all packets from a zstd-compressed pcapng file.
+func readAllPacketsZst(t *testing.T, path string) []pcapPacket {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {
@@ -74,7 +75,13 @@ func readAllPackets(t *testing.T, path string) []pcapPacket {
 	}
 	defer func() { _ = f.Close() }()
 
-	r, err := pcapgo.NewNgReader(f, pcapgo.NgReaderOptions{})
+	zr, err := zstd.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	r, err := pcapgo.NewNgReader(zr, pcapgo.NgReaderOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,14 +144,14 @@ func TestSaveCaptureProducesSingleFile(t *testing.T) {
 		t.Fatalf("SaveCapture: %v", err)
 	}
 
-	capturePath := filepath.Join(gotPath, "capture.pcapng")
+	capturePath := filepath.Join(gotPath, "capture.pcapng.zst")
 	if _, err := os.Stat(capturePath); err != nil {
-		t.Fatalf("capture.pcapng not found: %v", err)
+		t.Fatalf("capture.pcapng.zst not found: %v", err)
 	}
 
 	// Old individual segment files should NOT exist
 	if _, err := os.Stat(filepath.Join(gotPath, "segment_000.pcapng")); err == nil {
-		t.Error("individual segment file should not exist, expected single capture.pcapng")
+		t.Error("individual segment file should not exist, expected single capture.pcapng.zst")
 	}
 }
 
@@ -176,7 +183,7 @@ func TestSaveCaptureMultipleSegmentsMerged(t *testing.T) {
 		t.Fatalf("SaveCapture: %v", err)
 	}
 
-	pkts := readAllPackets(t, filepath.Join(gotPath, "capture.pcapng"))
+	pkts := readAllPacketsZst(t, filepath.Join(gotPath, "capture.pcapng.zst"))
 	if len(pkts) != 3 {
 		t.Fatalf("expected 3 packets, got %d", len(pkts))
 	}
@@ -217,7 +224,7 @@ func TestSaveCaptureChronologicalOrderWraparound(t *testing.T) {
 		t.Fatalf("SaveCapture: %v", err)
 	}
 
-	pkts := readAllPackets(t, filepath.Join(gotPath, "capture.pcapng"))
+	pkts := readAllPacketsZst(t, filepath.Join(gotPath, "capture.pcapng.zst"))
 	if len(pkts) != 3 {
 		t.Fatalf("expected 3 packets, got %d", len(pkts))
 	}
@@ -265,7 +272,7 @@ func TestSaveCaptureMergedOutputReadable(t *testing.T) {
 		t.Fatalf("SaveCapture: %v", err)
 	}
 
-	pkts := readAllPackets(t, filepath.Join(gotPath, "capture.pcapng"))
+	pkts := readAllPacketsZst(t, filepath.Join(gotPath, "capture.pcapng.zst"))
 	if len(pkts) != 3 {
 		t.Fatalf("expected 3 packets, got %d", len(pkts))
 	}
@@ -302,8 +309,8 @@ func TestSaveCaptureMetadataHasCapturePath(t *testing.T) {
 		t.Fatalf("invalid JSON in metadata.json: %v", err)
 	}
 
-	if meta["capture_path"] != "capture.pcapng" {
-		t.Errorf("capture_path: got %v, want capture.pcapng", meta["capture_path"])
+	if meta["capture_path"] != "capture.pcapng.zst" {
+		t.Errorf("capture_path: got %v, want capture.pcapng.zst", meta["capture_path"])
 	}
 	if _, ok := meta["segments"]; ok {
 		t.Error("metadata should not contain 'segments' field")
@@ -313,6 +320,51 @@ func TestSaveCaptureMetadataHasCapturePath(t *testing.T) {
 	}
 	if meta["source"] != "signal" {
 		t.Errorf("source: got %v, want signal", meta["source"])
+	}
+}
+
+func TestSaveCaptureMetadataHasStats(t *testing.T) {
+	savedDir := filepath.Join(t.TempDir(), "saved")
+	segDir := t.TempDir()
+
+	t0 := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	t1 := t0.Add(5 * time.Second)
+
+	seg0 := writePcapngSegment(t, segDir, "segment_000.pcapng", []pcapPacket{
+		{ts: t0, data: []byte("first")},
+		{ts: t0.Add(1 * time.Second), data: []byte("second")},
+	})
+	seg1 := writePcapngSegment(t, segDir, "segment_001.pcapng", []pcapPacket{
+		{ts: t1, data: []byte("third")},
+	})
+
+	segs := []buffer.SegmentMeta{
+		{Index: 0, Path: seg0, StartTime: t0},
+		{Index: 1, Path: seg1, StartTime: t1},
+	}
+	gotPath, err := persist.SaveCapture(savedDir, "tid-stats", "api", "eth0", defaultSaveOpts(), segs, buffer.SHBInfo{})
+	if err != nil {
+		t.Fatalf("SaveCapture: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(gotPath, "metadata.json"))
+	if err != nil {
+		t.Fatalf("read metadata.json: %v", err)
+	}
+
+	var meta persist.TriggerMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("invalid JSON in metadata.json: %v", err)
+	}
+
+	if meta.Stats == nil {
+		t.Fatal("expected stats in metadata, got nil")
+	}
+	if meta.Stats.TotalPackets != 3 {
+		t.Errorf("stats.total_packets: got %d, want 3", meta.Stats.TotalPackets)
+	}
+	if meta.Stats.TotalBytes == 0 {
+		t.Error("stats.total_bytes should be > 0")
 	}
 }
 
