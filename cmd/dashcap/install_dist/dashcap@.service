@@ -1,6 +1,6 @@
 [Unit]
 Description=dashcap packet capture on %i
-Documentation=https://github.com/your-org/dashcap
+Documentation=https://github.com/0x1f6/dashcap
 After=network-online.target
 Wants=network-online.target
 

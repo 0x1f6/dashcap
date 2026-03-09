@@ -107,12 +107,12 @@ type TriggerStatusResponse struct {
 
 // SegmentInfo is a single ring buffer segment from GET /api/v1/ring.
 type SegmentInfo struct {
-	Index     int    `json:"Index"`
-	Path      string `json:"Path"`
-	StartTime string `json:"StartTime"`
-	EndTime   string `json:"EndTime"`
-	Packets   int64  `json:"Packets"`
-	Bytes     int64  `json:"Bytes"`
+	Index     int    `json:"index"`
+	Path      string `json:"path"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+	Packets   int64  `json:"packets"`
+	Bytes     int64  `json:"bytes"`
 }
 
 // Health calls GET /api/v1/health.

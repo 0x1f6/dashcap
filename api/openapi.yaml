@@ -345,35 +345,33 @@ components:
 
     SegmentMeta:
       type: object
-      description: |
-        Metadata for a single ring buffer segment. Note: field names are
-        upper-case (Go struct without json tags).
-      required: [Index, Path, StartTime, EndTime, Packets, Bytes]
+      description: Metadata for a single ring buffer segment.
+      required: [index, path, start_time, end_time, packets, bytes]
       properties:
-        Index:
+        index:
           type: integer
           description: Segment index in the ring.
           examples: [0]
-        Path:
+        path:
           type: string
           description: Absolute path to the segment file.
           examples: [/var/lib/dashcap/eth0/ring/segment_000.pcapng]
-        StartTime:
+        start_time:
           type: string
           format: date-time
           description: Timestamp of the first packet in this segment.
           examples: ["2026-03-02T22:29:00Z"]
-        EndTime:
+        end_time:
           type: string
           format: date-time
           description: Timestamp of the last packet in this segment.
           examples: ["2026-03-02T22:30:00Z"]
-        Packets:
+        packets:
           type: integer
           format: int64
           description: Number of packets in this segment.
           examples: [500]
-        Bytes:
+        bytes:
           type: integer
           format: int64
           description: Bytes written to this segment.

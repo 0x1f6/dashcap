@@ -2,7 +2,7 @@
 
 > Full-Packet Capture with Ring Buffer and On-Demand Persistence
 
-**Version:** 1.0 · **Date:** March 2026 · **Status:** Phase 1 & 2 complete
+**Version:** 1.0 · **Date:** March 2026 · **Status:** Phase 1 & 2 complete, Phase 3 in progress
 
 ---
 
@@ -43,7 +43,7 @@ A dashcam solves an analogous problem for drivers: it records continuously but o
 - **External Trigger Integration:** REST API for SIEM/SOAR integration and local trigger mechanisms.
 - **Multi-Instance:** Multiple independent instances for different interfaces on the same host, with proper isolation and locking.
 - **Configurable Exclusions:** BPF-based traffic filters to exclude known-benign high-volume traffic from capture, preserving ring buffer space for relevant packets.
-- **Flexible Buffer Limits:** Buffer size configurable by total size, number of segments, or time-based retention duration.
+- **Flexible Buffer Limits:** Buffer size configurable by total size and segment size (segment count is derived).
 - **Single Binary Deployment:** Single binary with only libpcap (Linux/macOS) or Npcap (Windows) as runtime dependency. Easy to deploy across a fleet.
 
 ### 3.2 Non-Goals
@@ -93,12 +93,13 @@ A dashcam solves an analogous problem for drivers: it records continuously but o
 ### 4.2 Control Plane
 
 ```
-  ┌──────────────────┐
-  │   REST API        │
-  │   (TCP)           │
-  └────────┬──────────┘
-           │
-           ▼
+  ┌──────────────────┐     ┌──────────────────┐
+  │   REST API        │     │   SIGUSR1 Signal  │
+  │   (TCP)           │     │   (default save)  │
+  └────────┬──────────┘     └────────┬──────────┘
+           │                         │
+           └────────────┬────────────┘
+                        ▼
   ┌──────────────────────────────────────────┐
   │          Trigger Dispatcher               │
   │   Receives requests, initiates persistence│
@@ -158,7 +159,7 @@ This approach eliminates the need for runtime disk monitoring, global coordinati
 
 ### 5.5 Trigger Mechanism
 
-Triggers are issued exclusively via the REST API. This keeps the trigger interface uniform and allows full control over parameters (time window, metadata) that simpler mechanisms like signals cannot express.
+Triggers can be issued via the REST API or the SIGUSR1 signal. The REST API provides full control over parameters (time window, metadata), while SIGUSR1 triggers a default-duration capture — useful for simple integrations like cron jobs or `systemctl kill --signal=USR1`.
 
 When a trigger is received:
 
@@ -201,12 +202,12 @@ Ring state is not persisted across restarts. After a restart, all segments are t
 
 ### 6.4 Trigger Dispatcher
 
-The trigger dispatcher receives trigger requests from the REST API and orchestrates the save pipeline:
+The trigger dispatcher receives trigger requests (from the REST API or SIGUSR1 signal handler) and orchestrates the save pipeline:
 
 - Calculates which ring segments fall within the requested time window based on segment timestamps.
 - Hands off the segment list to the persistence layer.
 - Returns a trigger ID and status to the caller.
-- Debouncing with a 5-second cooldown between triggers. Duplicate triggers within the cooldown window are rejected with a 429 response.
+- Debouncing with a 5-second cooldown between triggers. Duplicate API triggers within the cooldown window receive a 429 response; signal triggers are silently dropped.
 
 ### 6.5 Persistence Layer
 
@@ -219,7 +220,7 @@ The trigger dispatcher receives trigger requests from the REST API and orchestra
 
 ### 6.6 REST API
 
-The REST API provides programmatic control over the dashcap instance, served via HTTP on a configurable TCP port.
+The REST API provides programmatic control over the dashcap instance, served via HTTP (or HTTPS with `--tls-cert`/`--tls-key`) on a configurable TCP port.
 
 | Method | Endpoint               | Description                                                             |
 | ------ | ---------------------- | ----------------------------------------------------------------------- |
@@ -233,7 +234,7 @@ The REST API provides programmatic control over the dashcap instance, served via
 *Planned:*
 - `PUT /api/v1/filters` — Update BPF exclusion filters (hot reload)
 
-The API uses standard HTTP status codes and returns JSON. All endpoints except `/health` require bearer-token authentication (enabled by default). The token is auto-generated at startup or can be set via `--api-token` flag or `DASHCAP_API_TOKEN` environment variable. TLS is supported via `--tls-cert` / `--tls-key` flags. Authentication can be disabled with `--no-auth`.
+The API uses standard HTTP status codes and returns JSON. All endpoints except `/health` require bearer-token authentication (enabled by default). The token is resolved from: `--api-token` flag → `DASHCAP_API_TOKEN` env → token file (`/etc/dashcap/api-token`) → auto-generated. TLS is supported via `--tls-cert` / `--tls-key` flags. Authentication can be disabled with `--no-auth`.
 
 ---
 
@@ -264,6 +265,7 @@ safety:
 api:
   tcp_port: 9800               # 0 = disabled, >0 = enable TCP REST API
   token: ""                    # Bearer token for API auth (empty = auto-generated)
+  token_file: /etc/dashcap/api-token  # Path to API token file (read/write)
   no_auth: false               # Disable API authentication entirely
   tls_cert: ""                 # Path to TLS certificate file
   tls_key: ""                  # Path to TLS private key file
@@ -395,7 +397,7 @@ Platform-specific code is isolated using Go build tags (`//go:build linux`, `//g
 | Pre-allocation        | `fallocate()`           | `SetEndOfFile()`                | `fcntl(F_PREALLOCATE)` |
 | Free disk space       | `statfs()`              | `GetDiskFreeSpaceEx()`          | `statfs()`             |
 | Local API *(planned)* | Unix socket             | —                               | Unix socket            |
-| Service *(planned)*   | systemd (template unit) | Windows Service (SCM)           | launchd (plist)        |
+| Service               | systemd (template unit) | Windows Service (SCM) *(planned)* | launchd (plist) *(planned)* |
 | Default data dir      | `/var/lib/dashcap/`     | `C:\ProgramData\dashcap\`       | `/var/lib/dashcap/`    |
 | Default lock dir      | `/run/dashcap/`         | `C:\ProgramData\dashcap\locks\` | `/run/dashcap/`        |
 | Permissions           | `CAP_NET_RAW`           | Administrator / Npcap group     | root / BPF group       |
@@ -416,9 +418,9 @@ Disk safety is achieved through **pre-allocation** rather than runtime monitorin
 
 Saved captures (triggered persistence) are the only source of disk growth at runtime. Each save merges the relevant ring segments into a new zstd-compressed `capture.pcapng.zst` file. Zstd compression typically reduces pcapng size by 3–5×, significantly lowering disk consumption per save. Cleanup of old saved captures is left to external tooling or a future retention policy.
 
-### 10.3 Process Resource Limits
+### 10.3 Process Resource Limits *(planned)*
 
-- On Linux: the systemd unit can set `MemoryMax` and `OOMScoreAdjust=500` so dashcap is killed before critical system services under memory pressure.
+- On Linux: the systemd unit should set `MemoryMax` and `OOMScoreAdjust=500` so dashcap is killed before critical system services under memory pressure. Not yet implemented — see Phase 3 remaining items.
 - On Windows: job objects can set memory limits for the service process.
 
 ---
@@ -429,7 +431,13 @@ Saved captures (triggered persistence) are the only source of disk growth at run
 dashcap/
 ├── cmd/dashcap/               # CLI entry point (Cobra)
 │   ├── main.go                # Root command + capture daemon
-│   └── client.go              # `dashcap client` subcommand group
+│   ├── client.go              # `dashcap client` subcommand group
+│   ├── tokeninit.go           # `dashcap token-init` subcommand
+│   ├── install_linux.go       # `dashcap install-service` (Linux)
+│   ├── install_other.go       # `dashcap install-service` stub (non-Linux)
+│   └── install_dist/          # Embedded systemd unit + sysusers/tmpfiles
+├── api/
+│   └── openapi.yaml           # OpenAPI 3.1 specification
 ├── internal/
 │   ├── api/                   # REST API server
 │   │   ├── server.go          # HTTP handlers + router
@@ -446,6 +454,7 @@ dashcap/
 │   │   ├── config.go          # Config struct, defaults, validation
 │   │   ├── load.go            # YAML config file loading
 │   │   └── size.go            # Human-readable size parsing (e.g. "2GB")
+│   ├── notify/                # sd_notify integration (systemd readiness)
 │   ├── persist/               # Save/export logic
 │   │   ├── persist.go         # Segment merge + zstd compression
 │   │   └── stats.go           # Capture statistics collection
@@ -456,9 +465,10 @@ dashcap/
 │   │   ├── prealloc_linux.go  # fallocate
 │   │   └── prealloc_darwin.go # fcntl(F_PREALLOCATE)
 │   └── trigger/               # Trigger dispatcher
-│       └── trigger.go         # Receives API triggers, orchestrates saves
+│       └── trigger.go         # Receives triggers (API + signal), orchestrates saves
 ├── configs/
 │   └── dashcap.example.yaml   # Example configuration
+├── .github/                   # CI/CD workflows + Dependabot
 ├── DESIGN.md                  # Architecture and design document
 ├── Makefile                   # Build, test, lint, cross-compile targets
 ├── go.mod
@@ -502,7 +512,7 @@ dashcap/
 - Trigger debouncing (5-second cooldown, 429 response)
 - Embedding dashcap metadata in pcapng Section Header Block options (`shb_userappl`, `shb_comment`)
 
-### Phase 3 — Production Hardening
+### Phase 3 — Production Hardening *(in progress)*
 
 *Goal: Reliable operation as a system service.*
 

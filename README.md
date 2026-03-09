@@ -4,7 +4,18 @@ A network packet dashcam — continuous full-packet capture with on-demand persi
 
 > **Work in progress.** dashcap is under active development and not yet stable or suitable for production use. APIs, CLI flags, and on-disk formats may change without notice.
 
-dashcap continuously captures all network traffic into a pre-allocated ring buffer of pcapng segments. When triggered (via the REST API), it saves the relevant capture window — including traffic from *before* the trigger — for later analysis. Think of it as a dashcam for your network: always recording, only saving when something happens.
+dashcap continuously captures all network traffic into a pre-allocated ring buffer of pcapng segments. When triggered (via the REST API or a signal), it saves the relevant capture window — including traffic from *before* the trigger — for later analysis. Think of it as a dashcam for your network: always recording, only saving when something happens.
+
+### Why dashcap?
+
+Security teams face a fundamental trade-off: full packet capture provides complete visibility but requires massive storage, while NetFlow/metadata approaches are storage-efficient but lack the detail needed for incident response. dashcap bridges this gap by keeping a rolling window of full packet data and only persisting it when something interesting happens.
+
+**Use cases:**
+
+- **SIEM/SOAR integration** — A Splunk or Elastic alert triggers dashcap via its REST API, automatically preserving the packet data around the time of the alert for investigation.
+- **Incident response** — During active IR, trigger a save to capture the current network state and recent history on any endpoint.
+- **Threat hunting** — Periodic or anomaly-driven triggers preserve packet windows for offline analysis with Wireshark or similar tools.
+- **Endpoint forensics** — Running on endpoints provides traffic from the host's own perspective, including localhost and internal communications that network taps cannot see.
 
 ## How It Works
 
@@ -21,7 +32,7 @@ Network Interface → Capture Engine → Segment Writer → Ring Buffer (fixed s
 
 ## Status
 
-**Phase 1 (MVP), Phase 2 (Configuration & Filters), and Phase 3 (systemd Service) are complete.** The core capture-to-disk pipeline with REST API triggers, YAML configuration, BPF exclusion filters, per-trigger status tracking, and systemd service integration works on Linux. See [DESIGN.md](DESIGN.md) for the full roadmap.
+**Phase 1 (MVP) and Phase 2 (Configuration & Filters) are complete. Phase 3 (Production Hardening) is in progress** — Linux systemd service integration is done; Windows Service support and process resource limits are planned. The core capture-to-disk pipeline with REST API triggers, YAML configuration, BPF exclusion filters, per-trigger status tracking, and systemd service integration works on Linux. See [DESIGN.md](DESIGN.md) for the full roadmap.
 
 What's implemented:
 - `gopacket/pcap` capture backend (cross-platform)
@@ -46,6 +57,8 @@ What's implemented:
 - Dedicated `dashcap` system user/group with capability-based security (no root)
 - API token file (`/etc/dashcap/api-token`) with group-based access control
 - SIGUSR1 signal trigger for default-duration captures
+- Custom trigger time windows (`--duration` or `--since` parameter)
+- Graceful shutdown with capture flush on SIGTERM/SIGINT
 - `dashcap install-service` command for standalone deployments
 - `sd_notify` integration for accurate service readiness reporting
 
@@ -88,7 +101,7 @@ sudo bin/dashcap -i lo --buffer-size 10MB --segment-size 1MB --api-port 9800
 You should see:
 
 ```
-time=... level=INFO msg="API token generated" token=<generated-token>
+time=... level=WARN msg="API token auto-generated (no persistent storage)" token=<generated-token>
 time=... level=INFO msg="dashcap starting" version=dev interface=lo
 time=... level=INFO msg="ring buffer configured" segments=10 segment_mb=1 total_mb=10
 time=... level=INFO msg="ring pre-allocated" path=/var/lib/dashcap/lo
@@ -325,16 +338,19 @@ An example configuration file is provided at [`configs/dashcap.example.yaml`](co
 ```
 dashcap/
 ├── cmd/dashcap/           # CLI entry point (Cobra)
+├── api/                   # OpenAPI 3.1 specification
 ├── internal/
 │   ├── api/               # REST API server (net/http)
 │   ├── buffer/            # Ring manager + pcapng segment writer
 │   ├── capture/           # Packet capture abstraction (gopacket/pcap)
 │   ├── client/            # HTTP client for the REST API (used by `dashcap client`)
 │   ├── config/            # Runtime configuration + validation
+│   ├── notify/            # sd_notify integration (systemd readiness)
 │   ├── persist/           # Save triggered captures to disk
 │   ├── storage/           # Platform-specific disk ops (prealloc, flock, free space)
-│   └── trigger/           # Trigger dispatcher (API-triggered saves)
+│   └── trigger/           # Trigger dispatcher (API + signal triggers)
 ├── configs/               # Example configuration
+├── .github/               # CI/CD workflows + Dependabot
 ├── DESIGN.md              # Full architecture and design document
 ├── Makefile               # Build, test, lint, cross-compile targets
 └── go.mod

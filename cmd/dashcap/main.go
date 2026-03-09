@@ -317,24 +317,15 @@ func run(cfg *config.Config) error {
 		close(captureDone)
 	}()
 
-	// SIGUSR1 trigger handler
-	usr1Ch := make(chan os.Signal, 1)
-	signal.Notify(usr1Ch, syscall.SIGUSR1)
-	go func() {
-		for range usr1Ch {
-			slog.Info("SIGUSR1 received, triggering capture save")
-			if _, err := dispatcher.Trigger("signal", trigger.TriggerOpts{}); err != nil {
-				slog.Debug("signal trigger rejected", "error", err)
-			}
-		}
-	}()
+	// SIGUSR1 trigger handler (Unix only; no-op on Windows)
+	stopSignalTrigger := setupSignalTrigger(dispatcher)
 
 	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-sigCh
 	slog.Info("received signal, shutting down", "signal", sig)
-	signal.Stop(usr1Ch)
+	stopSignalTrigger()
 
 	// Graceful shutdown: stop capture source first so the loop exits,
 	// then wait for it to finish before closing the ring.

@@ -16,12 +16,12 @@ import (
 
 // SegmentMeta holds metadata about a single ring segment.
 type SegmentMeta struct {
-	Index     int
-	Path      string
-	StartTime time.Time
-	EndTime   time.Time
-	Packets   int64
-	Bytes     int64
+	Index     int       `json:"index"`
+	Path      string    `json:"path"`
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
+	Packets   int64     `json:"packets"`
+	Bytes     int64     `json:"bytes"`
 }
 
 // RingManager pre-allocates and manages a fixed-size ring of pcapng segment files.
